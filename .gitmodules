@@ -1,0 +1,6 @@
+[submodule "HuC6280"]
+	path = HuC6280
+	url = https://github.com/fseidel/HuC6280
+[submodule "src/rtl/HuC6280"]
+	path = src/rtl/HuC6280
+	url = https://github.com/fseidel/HuC6280
