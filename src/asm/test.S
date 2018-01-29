@@ -11,9 +11,12 @@
 .ENDRO
 
 .ORG $1000
-    LDA     #$BE
-    LDX     #$EF
-    LDY     #42
+    SMB0    $00
+    LDX     $00
+    SMB1    $00
+    LDY     $00
+    RMB0    $00
+    LDA     $00
     
 LOOP:   
     BRA     LOOP
