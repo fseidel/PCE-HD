@@ -4,4 +4,4 @@ ucli.key
 *.hex
 *.bin
 *.o
-
+*.swp
