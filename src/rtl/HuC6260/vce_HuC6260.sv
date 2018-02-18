@@ -74,42 +74,7 @@ module clk_divide(input logic clk, reset_N,
     end
 
   end
-    // Defaults
-    counter_next = count;
-    mode_next = mode;
-    clk_next = 0;
-    
-    if (counter == 0) begin
-
-      unique case (mode) 
-
-        2'b0: begin
-          
-
-        end
-
-        2'b1: begin
-
-        end
-
-        2'b2, 2'b3: begin
-
-          counter_next = 0;
-          
-
-        end
-
-        default: begin
-
-        end
-
-      endcase
-    end
-
-    always_ff 
-
-  end
-
+  
 endmodule: clk_divide
 
 `endif
@@ -153,30 +118,66 @@ module vce_HuC6260( input logic clk, reset_N,
   logic [511:0][8:0] CRAM;
 
   // CRAM FSM
-  enum logic [2:0] {WAIT,} state, next_state;
+  enum logic [2:0] {IDLE, READ, WRITE, WAIT} state, next_state;
 
   
   logic clk_div;
   logic [1:0] mode;
   clk_divide divide(.*);
 
+  logic [7:0] CR;
+  assign mode  = CR[1:0];
+
   
+  logic [8:0] addr, next_addr;
+
+  logic [7:0] data_rd;
+
+  assign D  = (~RD_n) ? data_rd : 8'bz;
+  assign data_rd  = (A[0]) ? {7'h0, CRAM[8]} : CRAM[7:0];
 
   // Output and next-state generator
   always_comb begin
-    
+    next_addr         = addr;
     unique case (state)
+      IDLE: begin
+        if(~WR_n) next_state = WRITE;
+        else if(~RD_n) next_state = READ;
+        else next_state = IDLE;
+      end
+
+      READ: begin
+        if(A[0]) next_addr = addr + 1'b1;
+        next_state  = WAIT;
+      end
+
+      WRITE: begin
+        if(A[0]) next_addr = addr + 1'b1;
+        CRAM[addr] <= D;
+        next_state  = WAIT;
+      end
 
       WAIT: begin
+        if(WR_n & RD_n) next_state = IDLE;
+        else next_state = WAIT;
       end
-
-      default: begin
-      end
-
+      
     endcase
   end
 
-
+  //should be on master clock
+  always_ff @(posedge clk, negedge reset_N) begin
+    if(~reset_N) begin
+      state <= IDLE;
+      addr <= 0;
+    end
+    else begin
+      state <= next_state;
+      addr <= next_addr;
+    end
+      
+  end
+  
 endmodule: vce_HuC6260;
 
 
