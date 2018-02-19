@@ -17,9 +17,19 @@
     LDY     $00
     RMB0    $00
     LDA     $00
-    
+    BBS0    $00, NOT_TAKEN
+    BBR0    $00, TAKEN
 LOOP:   
     BRA     LOOP
+NOT_TAKEN:
+    LDA     #$FF
+    BRA     LOOP
+TAKEN2:
+    LDX     #$FF
+    BRA     LOOP
+TAKEN:
+    LDA     #$0F
+    BBR0    $00, TAKEN2
     
 .ORG $FFFA                 
     .DW     $FFFF ;NMI Vector
