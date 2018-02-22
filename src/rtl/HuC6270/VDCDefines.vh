@@ -9,10 +9,31 @@
 `ifndef VDC_DEFINES_VH_
 `define VDC_DEFINES_VH_
 
+// Address register values indicating the register to use
+typedef enum logic [4:0] {
+    REG_MAWR    = 5'd0,
+    REG_MARR    = 5'd1,
+    REG_VRR_VWR = 5'd2,
+    REG_CR      = 5'd5,
+    REG_RCR     = 5'd6,
+    REG_BXR     = 5'd7,
+    REG_BYR     = 5'd8,
+    REG_MWR     = 5'd9,
+    REG_HSR     = 5'd10,
+    REG_HDR     = 5'd11,
+    REG_VPR     = 5'd12,
+    REG_VDW     = 5'd13,
+    REG_VCR     = 5'd14,
+    REG_DCR     = 5'd15,
+    REG_SOUR    = 5'd16,
+    REG_DESR    = 5'd17,
+    REG_LENR    = 5'd18,
+    REG_SATB    = 5'd19
+} reg_sel_t;
+
 // Incoming values on A[1:0] bus from CPU to VDC
 typedef enum logic [1:0] {
-    A_STATUS_REG = 2'd0,
-    A_ADDR_REG   = 2'd1,
+    A_STATUS_ADDR_REG = 2'd0,
     A_DATA_LSB   = 2'd2,
     A_DATA_MSB   = 2'd3
 } a_sel_t;
@@ -31,7 +52,22 @@ typedef struct packed {
   logic [11:0] tile_index; // Index for tile (VRAM address is tile_index << 5)
 } bat_entry_t;
 
+// VDC Status Register
+typedef struct packed {
+  logic dummy; // Always set to 0
+  logic BSY;   // "I believe this is 1 when a DMA transfer is happening"
+  logic VD;    // "I believe this is a 1 when Vertical Synch happens, otherwise a 0 (uncertain)"
+  logic DV;    // "(unknown)"
+  logic DS;    // "(unknown)"
+  logic RR;    // "Set during a Scanline interrupt (see RCR register), otherwise 0"
+  logic OR;    // "(unknown)"
+  logic CR;    // "(unknown)"
+} status_reg_t;
 
+// VDC Address Register
+typedef struct packed {
+  logic [4:0] addr;
+} addr_reg_t;
 
 // Packed register definitions
 

@@ -6,42 +6,10 @@
  * (C) 2018 Ford Seidel and Amolak Nagi
  */
 
-/*
-module top();
-
-  logic clock, CS_n, WR_n, reset_n, dummy;
-  logic [15:0] D;
-
-  vdc_HuC6270 vdc(.*);
-
-  // This entire TB is just to make sure the BRAM is working
-  // in simulation. Disregard all of this
-
-  initial begin
-    $monitor("state: %s data_out: %x", vdc.state, vdc.data_out);
-    clock = 1'b0;
-    reset_n = 1'b0;
-    reset_n <= 1'b1;
-    forever #5 clock = ~clock;
-  end
-
-  initial begin
-
-    @(posedge clock);
-    @(posedge clock);
-    @(posedge clock);
-    @(posedge clock);
-
-    $finish;
-  end
-
-endmodule: top
-*/
-
 
 module vdc_HuC6270(input logic clock,
                                reset_n,         
-                   input logic [15:0] D,// Data in, only lower 8 bits used
+                   input logic [7:0] DI,// Data in, only lower 8 bits used
                    input logic MRD_n,   // "Memory Read Data" from CPU from VRAM 
                                MWR_n,   // Memory write from CPU to VRAM
                                HSYNC_n,
@@ -52,10 +20,8 @@ module vdc_HuC6270(input logic clock,
                                EX_8_16, // 1 if 8-bit, 0 if 16. WILL ALWAYS BE SET TO 1
                    input logic [1:0] A, // Address bus indicator
                    output logic [8:0] VD,
-                               BUSY_n,
-                               IRQ_n
-//                                CS_n,
-//                                WR_n,
+                   output logic [7:0] DO,
+                   output logic BUSY_n, IRQ_n
                   );	
 
 
@@ -65,10 +31,13 @@ module vdc_HuC6270(input logic clock,
                  .RD_n(RD_n),
                  .WR_n(WR_n),
                  .CS_n(CS_n),
+                 .DI(DI),
+                 .DO(DO),
                  .A(A),
                  .BUSY_n(BUSY_n),
                  .IRQ_n(IRQ_n)
                 );
+
 
 
 
@@ -101,14 +70,15 @@ module vdc_HuC6270(input logic clock,
                .q(data_out));
 
 
+  /*
   logic [7:0] D_reg;
   DataBusBuffer(.clock(clock),
                 .reset_n(reset_n),
-                .D(D),
+                .D(DI),
                 .ld(),
                 .buf_data(D_reg)
                );
-
+  */
 
 
 
@@ -162,6 +132,38 @@ module vdc_HuC6270(input logic clock,
 endmodule : vdc_HuC6270;
 
 
+
+/*
+module top();
+
+  logic clock, CS_n, WR_n, reset_n, dummy;
+  logic [15:0] D;
+
+  vdc_HuC6270 vdc(.*);
+
+  // This entire TB is just to make sure the BRAM is working
+  // in simulation. Disregard all of this
+
+  initial begin
+    $monitor("state: %s data_out: %x", vdc.state, vdc.data_out);
+    clock = 1'b0;
+    reset_n = 1'b0;
+    reset_n <= 1'b1;
+    forever #5 clock = ~clock;
+  end
+
+  initial begin
+
+    @(posedge clock);
+    @(posedge clock);
+    @(posedge clock);
+    @(posedge clock);
+
+    $finish;
+  end
+
+endmodule: top
+*/
 
 
 

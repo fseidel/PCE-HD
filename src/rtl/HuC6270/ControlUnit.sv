@@ -20,41 +20,81 @@ module ControlUnit( input logic   clock,
                                   WR_n,
                                   CS_n,
                     input a_sel_t A,
+                  input logic [7:0] DI,
+                  output logic [7:0] DO,
                    output logic   BUSY_n,
                                   IRQ_n 
                   );
 
+  logic [7:0] status_in, status;
+  logic ld_status_reg;
+  Register #($bits(status)) status_reg(
+                                        .clk(clock),
+                                        .en(),
+                                        .rst_l(),
+                                        .clear(),
+                                        .D(status_in),
+                                        .Q(status)
+                                      );
 
+
+  addr_reg_t addr_in, addr;
+  logic ld_addr_reg;
+  Register #($bits(addr), 5'd0) addr_reg(
+                                         .clk(clock),
+                                         .en(),
+                                         .rst_l(),
+                                         .clear(),
+                                         .D(addr_in),
+                                         .Q(addr)
+                                       );
 
 
   always_comb begin
 
-    unique case (A)
+    status_in = 8'd0;
+    addr_in = 5'd0;
 
-      A_STATUS_REG: begin
+    ld_status_reg = 1'd0;
+    ld_addr_reg = 1'd0;
 
-      end
+    if (~CS_n) begin
 
-
-
-      A_ADDR_REG: begin
-
-      end
+      unique case (A)
 
 
+        A_STATUS_ADDR_REG: begin
 
-      A_DATA_LSB: begin
+          // If read, fetch data from our Status register
+          if (~RD_n) begin
+            
+            
+            
 
-      end
+          end
+
+          // If write, write data to 
+          else if (~WR_n) begin
+
+          end
+
+        end
+
+
+        A_DATA_LSB: begin
+
+        end
 
 
 
-      A_DATA_MSB: begin
+        A_DATA_MSB: begin
 
-      end
+        end
       
 
-    endcase
+      endcase
+
+    end /* if (!CS_n) */
 
   end
 
