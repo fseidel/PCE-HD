@@ -19,12 +19,12 @@ module PixelExtractor(input logic [3:0][7:0] line_bytes,
   generate
     for (i = 0; i < 8; i++) begin : pix_extract
 
-      pixel_indices[i] = {
-                          line_bytes[3][7-i],
-                          line_bytes[2][7-i],
-                          line_bytes[1][7-i],
-                          line_bytes[0][7-i]
-                         };
+      assign pixel_indices[i] = {
+                                  line_bytes[3][7-i],
+                                  line_bytes[2][7-i],
+                                  line_bytes[1][7-i],
+                                  line_bytes[0][7-i]
+                                };
 
     end : pix_extract
   endgenerate
