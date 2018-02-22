@@ -6,6 +6,7 @@
  * (C) 2018 Ford Seidel and Amolak Nagi
  */
 
+/*
 module top();
 
   logic clock, CS_n, WR_n, reset_n, dummy;
@@ -35,16 +36,41 @@ module top();
   end
 
 endmodule: top
-
+*/
 
 
 module vdc_HuC6270(input logic clock,
                                reset_n,         
-                   input logic [15:0] D // Data in, only lower 8 bits used
-                   
+                   input logic [15:0] D,// Data in, only lower 8 bits used
+                   input logic MRD_n,   // "Memory Read Data" from CPU from VRAM 
+                               MWR_n,   // Memory write from CPU to VRAM
+                               HSYNC_n,
+                               VSYNC_n,
+                               CS_n,    // "when low, the CPU is able to read data from registers therein and sprite data thereinto"
+                               WR_n,
+                               RD_n,
+                               EX_8_16, // 1 if 8-bit, 0 if 16. WILL ALWAYS BE SET TO 1
+                   input logic [1:0] A, // Address bus indicator
+                   output logic [8:0] VD,
+                               BUSY_n,
+                               IRQ_n
 //                                CS_n,
 //                                WR_n,
                   );	
+
+
+
+  ControlUnit cu(.clock(clock),
+                 .reset_n(reset_n),
+                 .RD_n(RD_n),
+                 .WR_n(WR_n),
+                 .CS_n(CS_n),
+                 .A(A),
+                 .BUSY_n(BUSY_n),
+                 .IRQ_n(IRQ_n)
+                );
+
+
 
   // VRAM address and data bus wires
   logic [15:0] MA;
@@ -75,7 +101,13 @@ module vdc_HuC6270(input logic clock,
                .q(data_out));
 
 
-
+  logic [7:0] D_reg;
+  DataBusBuffer(.clock(clock),
+                .reset_n(reset_n),
+                .D(D),
+                .ld(),
+                .buf_data(D_reg)
+               );
 
 
 
