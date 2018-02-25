@@ -8,7 +8,7 @@
 
 
 `define SIMULATION
-
+`define FAKE_CRAM
 
 `ifdef SIMULATION
 
@@ -45,17 +45,17 @@ module clk_divide(input logic clk, reset_N,
         unique case (mode)
 
           // 10.738635 MHz, divide by 4
-          2'b2, 2'b3: begin
+          2'h2, 2'h3: begin
             counter <= 1;
           end
 
           // divide by 6
-          2'b1: begin
+          2'h1: begin
             counter <= 2;
           end
 
           // divide by 8
-          2'b0: begin
+          2'h0: begin
             counter <= 3;
           end
 
@@ -81,19 +81,19 @@ endmodule: clk_divide
 
 
 
-module vce_HuC6260( input logic clk, reset_N,
+module vce_HuC6260( input logic clock, reset_N,
 
-                    // To/From VDC
-                    inout logic [8:0] D, // Data bus, there's an 8th bit but supposedly it's unused
-                    inout logic [8:0] VD,
-                    inout logic HSYN,
-                    inout logic VSYN,
+                    // From VDC
+                    input logic [8:0]  VD,
+                    input logic        HSYN,
+                    input logic        VSYN,
 
 
 
                     // To/From CPU
-                    input logic [2:0] A,
-
+                    input logic [2:0]  A,
+                    inout wire [8:0]   D, // Data bus, there's an 9th bit but 
+                                         // supposedly it's unused
                     // Output to VGA
 
 
@@ -105,37 +105,72 @@ module vce_HuC6260( input logic clk, reset_N,
 
 
 
-                    output logic CK, // Likely the pixel clock
+                    output logic       CK, // Likely the pixel clock
 
+                    input logic        RD_n,
+                    input logic        WR_n,
+                    input logic        CS_n,
 
-                    input logic WR_n,
-                    input logic CS_n,
-
-                    input address_mode);    // 8 if hi, 16 if lo, forced to 8 bits
+                    input              address_mode);    // 8 if hi, 16 if lo, forced to 8 bits
 
 
   // ALL of our color data
-  logic [511:0][8:0] CRAM;
+`ifdef FAKE_CRAM
+  logic [15:0]     FAKE_CRAM[2**9-1:0]; //fseidel: make CRAM wide enough to support MEDNAFEN 
+                                        //dumps natively
+  logic [511:0][9:0]      CRAM;
+  generate
+    genvar                i;
+    for(i = 0; i < 2**9; i++) begin
+      assign CRAM[i] = FAKE_CRAM[i][9:0]; //fseidel: is there a better way than a generate block?
+    end
+  endgenerate
+  
+  //load CRAM image
+  initial begin
+    $readmemh("PAL.hex", FAKE_CRAM);
+  end
+  
+`else
+  logic [511:0][9:0]      CRAM;
+`endif
+
 
   // CRAM FSM
-  enum logic [2:0] {IDLE, READ, WRITE, WAIT} state, next_state;
+  //enum logic [2:0] {IDLE, READ, WRITE, WAIT} state, next_state;
 
   
-  logic clk_div;
+  logic clock_div;
   logic [1:0] mode;
-  clk_divide divide(.*);
-
+  //clk_divide divide(.*);
+  assign clock_div = clock;
+  
   logic [7:0] CR;
   assign mode  = CR[1:0];
 
   
-  logic [8:0] addr, next_addr;
+  logic [8:0] CDATA, addr, next_addr;
 
   logic [7:0] data_rd;
 
   assign D  = (~RD_n) ? data_rd : 8'bz;
   assign data_rd  = (A[0]) ? {7'h0, CRAM[8]} : CRAM[7:0];
 
+  assign CDATA = CRAM[VD];
+  
+  always_ff @(posedge clock, negedge reset_N) begin
+    if(~reset_N) begin
+    end
+    else begin
+      VIDEO_B <= CDATA[2:0] << 5; //shift by 5 to map 3 bit color to 8 bits
+      VIDEO_R <= CDATA[5:3] << 5;
+      VIDEO_G <= CDATA[8:6] << 5;
+    end
+  end
+
+
+  
+  /*
   // Output and next-state generator
   always_comb begin
     next_addr         = addr;
@@ -177,6 +212,7 @@ module vce_HuC6260( input logic clk, reset_N,
     end
       
   end
+   */
   
 endmodule: vce_HuC6260;
 

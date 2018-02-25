@@ -50,7 +50,15 @@ typedef enum logic [1:0] {
 typedef struct packed {
   logic [3:0] palette_num; // Designated paletted for tile
   logic [11:0] tile_index; // Index for tile (VRAM address is tile_index << 5)
+  //note: shift may actually be 4 since BRAM access is word-wise, investigate
 } bat_entry_t;
+
+// tile line state
+typedef struct packed {
+  logic [8:0]  palette_num;
+  logic [15:0] CG0;
+  logic [15:0] CG1;
+} tile_line_t;
 
 // VDC Status Register
 typedef struct packed {
