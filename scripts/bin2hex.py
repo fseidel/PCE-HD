@@ -18,7 +18,7 @@ with open(noext + '.hex', "wb") as outfile:
     while(i < len(arr)):
         word = 0
         for x in range(0, wordsize):
-            word |= arr[i+x] << x
+            word |= arr[i+x] << (x*8)
         i += wordsize
         outfile.write(format(word, fmt) + '\n')
             

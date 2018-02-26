@@ -98,9 +98,9 @@ module vce_HuC6260( input logic clock, reset_N,
 
 
                     // output logic RGB_l,               // We won't be needing RGB_l/h
-                    output logic [7:0] VIDEO_G,
-                    output logic [7:0] VIDEO_R,
-                    output logic [7:0] VIDEO_B,
+                    output logic [2:0] VIDEO_G,
+                    output logic [2:0] VIDEO_R,
+                    output logic [2:0] VIDEO_B,
                     // output logic RGB_h,
 
 
@@ -122,7 +122,7 @@ module vce_HuC6260( input logic clock, reset_N,
   generate
     genvar                i;
     for(i = 0; i < 2**9; i++) begin
-      assign CRAM[i] = FAKE_CRAM[i][9:0]; //fseidel: is there a better way than a generate block?
+      assign CRAM[i] = FAKE_CRAM[i][8:0]; //fseidel: is there a better way than a generate block?
     end
   endgenerate
   
@@ -132,12 +132,13 @@ module vce_HuC6260( input logic clock, reset_N,
   end
   
 `else
-  logic [511:0][9:0]      CRAM;
+  logic [511:0][8:0]      CRAM;
 `endif
 
 
   // CRAM FSM
   //enum logic [2:0] {IDLE, READ, WRITE, WAIT} state, next_state;
+
 
   
   logic clock_div;
@@ -156,15 +157,25 @@ module vce_HuC6260( input logic clock, reset_N,
   assign D  = (~RD_n) ? data_rd : 8'bz;
   assign data_rd  = (A[0]) ? {7'h0, CRAM[8]} : CRAM[7:0];
 
-  assign CDATA = CRAM[VD];
+  assign CDATA  = CRAM[VD];
+
+  
   
   always_ff @(posedge clock, negedge reset_N) begin
     if(~reset_N) begin
+      VIDEO_B <= 0;
+      VIDEO_R <= 0;
+      VIDEO_G <= 0;
     end
-    else begin
-      VIDEO_B <= CDATA[2:0] << 5; //shift by 5 to map 3 bit color to 8 bits
-      VIDEO_R <= CDATA[5:3] << 5;
-      VIDEO_G <= CDATA[8:6] << 5;
+    else if(VD) begin
+      VIDEO_B <= CDATA[2:0];
+      VIDEO_R <= CDATA[5:3];
+      VIDEO_G <= CDATA[8:6];
+    end
+    else begin //TODO: handle background color + blanking
+      VIDEO_B <= 0;
+      VIDEO_R <= 0;
+      VIDEO_G <= 0;
     end
   end
 

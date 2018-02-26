@@ -31,6 +31,14 @@ typedef enum logic [4:0] {
     REG_SATB    = 5'd19
 } reg_sel_t;
 
+// State in horizontal line
+typedef enum logic [1:0] {
+    H_SYNC = 2'd0,
+    H_WAIT = 2'd1,
+    H_DISP = 2'd2,
+    H_END  = 2'd3                
+} h_state_t;
+
 // Incoming values on A[1:0] bus from CPU to VDC
 typedef enum logic [1:0] {
     A_STATUS_ADDR_REG = 2'd0,
@@ -49,8 +57,7 @@ typedef enum logic [1:0] {
 // 16-bit format of entry in the BAT
 typedef struct packed {
   logic [3:0] palette_num; // Designated paletted for tile
-  logic [11:0] tile_index; // Index for tile (VRAM address is tile_index << 5)
-  //note: shift may actually be 4 since BRAM access is word-wise, investigate
+  logic [11:0] tile_index; // Index for tile (word address is tile_index << 4)
 } bat_entry_t;
 
 // tile line state
