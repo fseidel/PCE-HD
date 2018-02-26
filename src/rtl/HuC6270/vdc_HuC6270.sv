@@ -97,11 +97,23 @@ module vdc_HuC6270(input logic clock, reset_N,
   h_state_t H_state; //state in horizontal line
 
 
-  logic [15:0] BXR, BYR; //x and y positions to start reading from
-  assign BXR = 0; //todo: scrolling
+  logic [15:0] BXR, BYR; //x and y scroll registers
+  assign BXR = 0; //These can be harcoded to force scroll
   assign BYR = 0;
 
-                
+  logic [9:0]  x_start, y_start, cur_row; //BG start values per line
+  logic [7:0]  x_mask, y_mask, y_shift;
+  
+  logic [2:0]  x_px_offset, y_px_offset;
+  logic [6:0]  x_tl_offset, y_tl_offset;
+  
+  assign y_shift = 5; //yet another hack
+  assign x_mask = (1 << 9) - 1;
+  assign y_mask = (1 << 9) - 1; //ditto
+  assign x_px_offset  = x_start[2:0];
+  assign x_tl_offset  = x_start[9:3];
+  assign y_px_offset  = y_start[2:0];
+  assign y_tl_offset  = y_start[9:3];
   
   //Hardcoded values for Parasol Stars title screen
   assign HSR  = 16'h0202;
@@ -122,17 +134,23 @@ module vdc_HuC6270(input logic clock, reset_N,
   assign HDE  = HDR[11:8];
                 
   assign do_BGfetch = (H_state == H_DISP) || 
-                      (H_state == H_WAIT && H_cnt == HDS - 2);
+                      (H_state == H_WAIT && H_cnt < 2);
 
   
-  assign HSYNC_n = (H_state == H_SYNC);
+  assign HSYNC_n = ~(H_state == H_SYNC);
   //H_state control
   always_ff @(posedge clock, negedge reset_N) begin
     if(~reset_N) begin
       H_cnt   <= HSW;
       H_state <= H_SYNC;
+      x_start <= 0;
+      y_start <= 0;
     end
     else begin
+      if(char_cycle == 6 && H_state == H_SYNC) begin
+        x_start <= BXR; //TODO: HACK! latch at end of DISP???
+        y_start <= BYR;
+      end
       if(char_cycle == 7) begin
         H_cnt <= H_cnt - 1; //default: decrement H_cnt
         case(H_state)
@@ -172,22 +190,28 @@ module vdc_HuC6270(input logic clock, reset_N,
   //VDC -> VCE communications
   logic        in_vdw; //are we currently in active display?
   assign in_vdw = (H_state == H_DISP);
+
+
+  logic [2:0]  cycle_adjusted;
+  assign cycle_adjusted = char_cycle + x_px_offset;
   
   always_comb begin
     VD = 0;
     if(in_vdw) begin
       VD[8]    = 0; //BG selected
       VD[7:4]  = output_tile.palette_num;
-      VD[3:0] = {output_tile.CG1[char_cycle + 8],
-                 output_tile.CG1[char_cycle], 
-                 output_tile.CG0[char_cycle + 8],
-                 output_tile.CG0[char_cycle]};
+      VD[3:0]  = {output_tile.CG1[15 - cycle_adjusted],
+                  output_tile.CG1[7 - cycle_adjusted], 
+                  output_tile.CG0[15 - cycle_adjusted],
+                  output_tile.CG0[7 - cycle_adjusted]};
     end
   end
   
   logic [15:0] tile_ptr;
+  logic [2:0]  fetch_row;
   bat_entry_t curbat;
   assign curbat  = MD_in;
+  assign fetch_row = y_px_offset + cur_row;
   
   //background pipeline
   always_ff @(posedge clock, negedge reset_N) begin
@@ -203,7 +227,7 @@ module vdc_HuC6270(input logic clock, reset_N,
         case(char_cycle)
           2: begin
             tile_pipe[bg_wr_ptr].palette_num <= curbat.palette_num;
-            tile_ptr                         <= curbat.tile_index << 4;
+            tile_ptr <= (curbat.tile_index << 4) + fetch_row;
           end
           6: tile_pipe[bg_wr_ptr].CG0 <= MD_in;
           0: tile_pipe[bg_wr_ptr].CG1 <= MD_in;
@@ -227,31 +251,50 @@ module vdc_HuC6270(input logic clock, reset_N,
     else MA = 0;
   end
 
-  logic firstchar; //first character of a line
-  //Counter management. Put counters here.
+  //BAT pointer management
+  always_ff @(posedge clock, negedge reset_N) begin
+    if(~reset_N) begin
+      bat_ptr <= 0;
+      cur_row <= 0; //TODO: actually handle this correctly
+    end
+    else begin
+      if(H_state == H_DISP && H_cnt == 0 && char_cycle == 7) begin
+        cur_row <= cur_row + 1; //TODO: need to initialize cur_row
+      end
+      else if(H_state == H_SYNC && H_cnt == 0 && char_cycle == 7) begin
+        bat_ptr <= (x_tl_offset & x_mask) + 
+                   ((((cur_row + y_start) >> 3) & y_mask) << y_shift);
+      end
+      else if(do_BGfetch) begin
+        if(char_cycle == 7) bat_ptr <= bat_ptr + 1;
+      end
+    end
+  end
+
+  
+  //char_cycle + rd/wr pointer adjustment
   always_ff @(posedge clock, negedge reset_N) begin
     if(~reset_N) begin
       char_cycle <= 0;
-      bat_ptr    <= 0;
       bg_wr_ptr  <= BG_PIPE_LEN-1; //first write of a line is garbage
       bg_rd_ptr  <= 0;
     end
     else begin
       char_cycle <= char_cycle + 1;
       if(in_vdw) begin
-        if(char_cycle == 7) begin//TODO: handle scrolling correctly
-          if(bg_wr_ptr == (BG_PIPE_LEN-1)) bg_wr_ptr <= 0;
-          else bg_wr_ptr <= bg_wr_ptr + 1;
+        if(cycle_adjusted == 7) begin
+          if(bg_rd_ptr == (BG_PIPE_LEN-1)) bg_rd_ptr <= 0;
+          else bg_rd_ptr <= bg_rd_ptr + 1;
         end
       end
       else bg_rd_ptr <= 0; //TODO: jump to real start of line
       if(do_BGfetch) begin
-        if(char_cycle == 7) bat_ptr <= bat_ptr + 1;
         if(char_cycle == 0) begin
           if(bg_wr_ptr == (BG_PIPE_LEN-1)) bg_wr_ptr <= 0;
           else bg_wr_ptr <= bg_wr_ptr + 1;
         end
       end
+      else bg_wr_ptr <= BG_PIPE_LEN-1; //first write is garbage
     end
   end
 

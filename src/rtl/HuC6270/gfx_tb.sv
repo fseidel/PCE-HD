@@ -33,7 +33,7 @@ module gfx_tb;
   int f, do_write;
   initial begin
     cycle = 0;
-    f                = $fopen("log.txt", "w");
+    f = $fopen("log.txt", "w");
     $monitor("cycle: %d, MA: %x, VD: %x, RGB: (%x %x %x)",
              cycle, vdc.MA, VD, R, G, B);
     do_write         = 0;
@@ -41,7 +41,8 @@ module gfx_tb;
     reset_N          = 1'b0;
     #10 reset_N     <= 1'b1;
     do_write        <= 1'b1;
-    #50000 do_write <= 1'b0;
+    while(vdc.cur_row < 224) #10 continue;
+    do_write <= 1'b0;
     $fclose(f);
     $finish;
   end
@@ -51,7 +52,7 @@ module gfx_tb;
       #10 clock  = ~clock;
       cycle++;
       if(do_write)
-        $fwrite(f, "%d %d %d 0 0\n", R, G, B);
+        $fwrite(f, "%3d %3d %3d %b %b\n", R, G, B, ~HSYNC_n, 1'b0);
     end
   end
 
