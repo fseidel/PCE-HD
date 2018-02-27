@@ -39,6 +39,15 @@ typedef enum logic [1:0] {
     H_END  = 2'd3                
 } h_state_t;
 
+// State in vertical screen
+typedef enum logic [1:0] {
+    V_SYNC = 2'd0,
+    V_WAIT = 2'd1,
+    V_DISP = 2'd2,
+    V_END  = 2'd3                
+} v_state_t;
+
+
 // Incoming values on A[1:0] bus from CPU to VDC
 typedef enum logic [1:0] {
     A_STATUS_ADDR_REG = 2'd0,

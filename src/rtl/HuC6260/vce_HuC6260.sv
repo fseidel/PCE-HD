@@ -121,7 +121,7 @@ module vce_HuC6260( input logic clock, reset_N,
   logic [511:0][9:0]      CRAM;
   generate
     genvar                i;
-    for(i = 0; i < 2**9; i++) begin
+    for(i = 0; i < 2**9; i++) begin: fake_CRAM_loop
       assign CRAM[i] = FAKE_CRAM[i][8:0]; //fseidel: is there a better way than a generate block?
     end
   endgenerate

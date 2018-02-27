@@ -90,12 +90,16 @@ module vdc_HuC6270(input logic clock, reset_N,
 
   logic [2:0]  char_cycle; //current position in char cycle
 
+  //latch H*R in horizontal blanking, V*R in vertical blanking
+  logic [15:0] HSR, HDR, VSR; 
+  logic [8:0]  VDR;
+  logic [7:0]  VCR;
   
-  logic [15:0] HSR, HDR, VSR, VDR, VCR; //maybe these should be structs?
   logic [9:0] H_cnt; //horizontal position counter, reused for each phase
+  logic [9:0] V_cnt; //vertical position counter, reused for each phase
 
   h_state_t H_state; //state in horizontal line
-
+  v_state_t V_state; //state in vertical screen
 
   logic [15:0] BXR, BYR; //x and y scroll registers
   assign BXR = 0; //These can be harcoded to force scroll
@@ -118,6 +122,7 @@ module vdc_HuC6270(input logic clock, reset_N,
   //Hardcoded values for Parasol Stars title screen
   assign HSR  = 16'h0202;
   assign HDR  = 16'h031F;
+  
   assign VSR  = 16'h0F02;
   assign VDR  = 16'h00EF;
   assign VCR  = 16'h0003;
@@ -127,14 +132,26 @@ module vdc_HuC6270(input logic clock, reset_N,
   logic [6:0] HDW;
   logic [3:0] HDE;
 
-  logic       do_BGfetch;
-  assign HSW  = HSR[4:0]; //may not be minus 1, investigate
+  
+  assign HSW  = HSR[4:0];
   assign HDS  = HSR[14:8];
   assign HDW  = HDR[6:0];
   assign HDE  = HDR[11:8];
-                
-  assign do_BGfetch = (H_state == H_DISP) || 
-                      (H_state == H_WAIT && H_cnt < 2);
+
+  logic [4:0] VSW;
+  logic [7:0] VDS;
+  logic [8:0] VDW;
+  //VCR is passed through
+
+  assign VSW  = VSR[4:0];
+  assign VDS  = VSR[15:8];
+  assign VDW  = VDR[8:0];
+  //VCR is passed through
+  
+  logic       do_BGfetch;            
+  assign do_BGfetch = ((H_state == H_DISP) || 
+                      (H_state == H_WAIT && H_cnt < 2)) && 
+                      (V_state == V_DISP);
 
   
   assign HSYNC_n = ~(H_state == H_SYNC);
@@ -179,6 +196,76 @@ module vdc_HuC6270(input logic clock, reset_N,
     end
   end
 
+  //V_state control
+  assign VSYNC_n  = ~(V_state == V_SYNC);
+  logic EOL;
+  assign EOL = (char_cycle == 7) && (H_state == H_END) && (H_cnt == 0);
+  always_ff @(posedge clock, negedge reset_N) begin
+    if(~reset_N) begin
+      V_cnt   <= VSW;
+      V_state <= V_SYNC;
+    end
+    else begin
+      if(EOL) begin
+        V_cnt <= V_cnt - 1;
+        case(V_state)
+          V_SYNC:
+            if(V_cnt == 0) begin
+              V_cnt   <= VDS + 1;
+              V_state <= V_WAIT;
+            end
+          V_WAIT: 
+            if(V_cnt == 0) begin
+              V_cnt   <= VDW;
+              V_state <= V_DISP;
+            end
+          V_DISP:
+            if(V_cnt == 0) begin
+              V_cnt   <= VCR - 1;
+              V_state <= V_END;
+            end
+          V_END:
+            if(V_cnt == 0) begin
+              V_cnt   <= VSW;
+              V_state <= V_SYNC;
+            end
+        endcase
+      end
+    end
+  end
+
+
+  //This stuff is probably not required for most games. Come back to it.
+   //the 4 vertical display states
+  //logic        V_top_blank, V_display, V_bot_blank, V_sync;
+  //logic [8:0]  frame_cnt, disp_cnt; //notation from cmacdonald
+  /*
+  logic frame_reset;
+  assign frame_reset  = (frame_cnt == `NUM_TOTAL_LINES);
+  //Vertical counters
+  always_ff @(posedge clock, negedge reset_N) begin
+    if(~reset_N) begin
+      frame_cnt <= 0;
+      disp_cnt  <= 0;
+    end
+    else begin
+      frame_cnt <= (frame_reset) ? 0 : frame_cnt + 1;
+      disp_cnt  <= disp_cnt + 1;
+    end
+  end
+   
+  //Vertical state
+  always_comb begin
+    {V_top_blank, V_display, V_bot_blank, V_sync}  = 0;
+    if(frame_cnt < `NUM_TOP_BLANK_LINES) V_top_blank = 1; 
+    else if(V_count < `NUM_TOP_BLANK_LINES + `NUM_DISPLAY_LINES) V_display = 1;
+    else if(V_count < `NUM_TOP_BLANK_LINES + `NUM_DISPLAY_LINES + 
+            `NUM_BOT_BLANK_LINES) V_bot_blank  = 1;
+    else V_sync = 1;
+    assign 
+  end
+*/
+  
   localparam BG_PIPE_LEN = 3; //we always write 2 ahead of our read
 
   tile_line_t [BG_PIPE_LEN-1:0] tile_pipe; //need extra slot for current fetch
@@ -189,7 +276,7 @@ module vdc_HuC6270(input logic clock, reset_N,
   
   //VDC -> VCE communications
   logic        in_vdw; //are we currently in active display?
-  assign in_vdw = (H_state == H_DISP);
+  assign in_vdw = (H_state == H_DISP && V_state == H_DISP);
 
 
   logic [2:0]  cycle_adjusted;
@@ -258,7 +345,8 @@ module vdc_HuC6270(input logic clock, reset_N,
       cur_row <= 0; //TODO: actually handle this correctly
     end
     else begin
-      if(H_state == H_DISP && H_cnt == 0 && char_cycle == 7) begin
+      if(V_state == V_WAIT) cur_row <= 0; //latch to 0 right before drawing
+      else if(H_state == H_DISP && H_cnt == 0 && char_cycle == 7) begin
         cur_row <= cur_row + 1; //TODO: need to initialize cur_row
       end
       else if(H_state == H_SYNC && H_cnt == 0 && char_cycle == 7) begin

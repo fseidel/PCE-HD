@@ -1,4 +1,5 @@
 `default_nettype none
+`include "VDCDefines.vh"
 
 module gfx_tb;
   logic clock, reset_N;
@@ -30,20 +31,35 @@ module gfx_tb;
                   .CK(), .RD_n(), .WR_n(), .CS_n(),
                   .address_mode());
 
-  int f, do_write;
+  string filename = "log.txt";
+  int f, do_write, frame_count, log_enabled, silent;
+  
+  assign log_enabled  = 1;
+  assign silent = 1;
+
   initial begin
-    cycle = 0;
-    f = $fopen("log.txt", "w");
-    $monitor("cycle: %d, MA: %x, VD: %x, RGB: (%x %x %x)",
-             cycle, vdc.MA, VD, R, G, B);
-    do_write         = 0;
-    clock            = 0;
-    reset_N          = 1'b0;
-    #10 reset_N     <= 1'b1;
-    do_write        <= 1'b1;
-    while(vdc.cur_row < 224) #10 continue;
-    do_write <= 1'b0;
-    $fclose(f);
+    cycle              = 0;
+    frame_count        = 0;
+    if(log_enabled) f  = $fopen(filename, "w");
+    if(!silent) begin
+      $monitor("cycle: %d, MA: %x, VD: %x, RGB: (%x %x %x), V_state: %s",
+               cycle, vdc.MA, VD, R, G, B, vdc.V_state);
+    end
+    do_write     = 0;
+    clock        = 0;
+    reset_N      = 1'b0;
+    #10 reset_N <= 1'b1;
+    do_write    <= 1'b1;
+    while(frame_count < 3) begin
+      while(!(vdc.V_state == V_END && vdc.V_cnt == 0 && vdc.EOL)) #10 continue;
+      frame_count++;
+      while(vdc.V_state == V_END && vdc.V_cnt == 0 && vdc.EOL) #10 continue;
+    end
+    if(log_enabled) begin
+      do_write <= 1'b0;
+      $fclose(f);
+      $system({"gzip ", filename});
+    end
     $finish;
   end
 
@@ -51,8 +67,8 @@ module gfx_tb;
     forever begin
       #10 clock  = ~clock;
       cycle++;
-      if(do_write)
-        $fwrite(f, "%3d %3d %3d %b %b\n", R, G, B, ~HSYNC_n, 1'b0);
+      if(log_enabled && do_write)
+        $fwrite(f, "%3d %3d %3d %b %b\n", R, G, B, HSYNC_n, VSYNC_n);
     end
   end
 
