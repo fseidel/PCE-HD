@@ -12,13 +12,14 @@ with open(filename, "rb") as infile:
     arr = bytearray(infile.read())
     
 noext = os.path.splitext(filename)[0]
+i = 0
+outstr = ''
+while(i < len(arr)):
+    word = 0
+    for x in range(0, wordsize):
+        word |= arr[i+x] << (x*8) #this assumes little endian
+    i += wordsize
+    outstr += format(word, fmt) + '\n'
 
 with open(noext + '.hex', "wb") as outfile:
-    i = 0
-    while(i < len(arr)):
-        word = 0
-        for x in range(0, wordsize):
-            word |= arr[i+x] << (x*8)
-        i += wordsize
-        outfile.write(format(word, fmt) + '\n')
-            
+        outfile.write(outstr)
