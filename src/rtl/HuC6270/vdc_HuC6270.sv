@@ -153,6 +153,9 @@ module vdc_HuC6270(input logic clock, reset_N,
                       (H_state == H_WAIT && H_cnt < 2)) && 
                       (V_state == V_DISP);
 
+
+  logic EOL; //signal for end of line
+  assign EOL = (char_cycle == 7) && (H_state == H_END) && (H_cnt == 0);
   
   assign HSYNC_n = ~(H_state == H_SYNC);
   //H_state control
@@ -197,74 +200,80 @@ module vdc_HuC6270(input logic clock, reset_N,
   end
 
   //V_state control
-  assign VSYNC_n  = ~(V_state == V_SYNC);
-  logic EOL;
-  assign EOL = (char_cycle == 7) && (H_state == H_END) && (H_cnt == 0);
+  logic frame_reset; //set below
   always_ff @(posedge clock, negedge reset_N) begin
     if(~reset_N) begin
-      V_cnt   <= VSW;
-      V_state <= V_SYNC;
+      V_cnt   <= VDS + 1;
+      V_state <= V_WAIT;
     end
     else begin
       if(EOL) begin
-        V_cnt <= V_cnt - 1;
-        case(V_state)
-          V_SYNC:
-            if(V_cnt == 0) begin
-              V_cnt   <= VDS + 1;
-              V_state <= V_WAIT;
-            end
-          V_WAIT: 
-            if(V_cnt == 0) begin
-              V_cnt   <= VDW;
-              V_state <= V_DISP;
-            end
-          V_DISP:
-            if(V_cnt == 0) begin
-              V_cnt   <= VCR - 1;
-              V_state <= V_END;
-            end
-          V_END:
-            if(V_cnt == 0) begin
-              V_cnt   <= VSW;
-              V_state <= V_SYNC;
-            end
-        endcase
+        if(frame_reset) begin
+          V_cnt <= VDS + 1;
+          V_state <= V_WAIT;
+        end
+        else begin
+          V_cnt <= V_cnt - 1;
+          case(V_state)
+            V_SYNC:
+              if(V_cnt == 0) begin
+                V_cnt   <= VDS + 1;
+                V_state <= V_WAIT;
+              end
+            V_WAIT: 
+              if(V_cnt == 0) begin
+                V_cnt   <= VDW;
+                V_state <= V_DISP;
+              end
+            V_DISP:
+              if(V_cnt == 0) begin
+                V_cnt   <= VCR - 1;
+                V_state <= V_END;
+              end
+            V_END:
+              if(V_cnt == 0) begin
+                V_cnt   <= VSW;
+                V_state <= V_SYNC;
+              end
+          endcase
+        end
       end
     end
   end
 
-
-  //This stuff is probably not required for most games. Come back to it.
    //the 4 vertical display states
-  //logic        V_top_blank, V_display, V_bot_blank, V_sync;
-  //logic [8:0]  frame_cnt, disp_cnt; //notation from cmacdonald
-  /*
-  logic frame_reset;
-  assign frame_reset  = (frame_cnt == `NUM_TOTAL_LINES);
+  logic        V_top_blank, V_display, V_bot_blank, V_sync;
+  logic [8:0]  frame_cnt; //notation from cmacdonald
+
+  localparam NUM_TOTAL_LINES = 263;
+  localparam NUM_TOP_BLANK_LINES  = 14;
+  localparam NUM_DISPLAY_LINES  = 242;
+  localparam NUM_BOT_BLANK_LINES  = 4;
+  localparam NUM_SYNC_LINES  = 3;
+  
+  assign frame_reset  = (frame_cnt == NUM_TOTAL_LINES);
   //Vertical counters
   always_ff @(posedge clock, negedge reset_N) begin
     if(~reset_N) begin
       frame_cnt <= 0;
-      disp_cnt  <= 0;
     end
-    else begin
+    else if(EOL) begin
       frame_cnt <= (frame_reset) ? 0 : frame_cnt + 1;
-      disp_cnt  <= disp_cnt + 1;
     end
   end
-   
+
+  assign VSYNC_n  = ~(V_sync);
+  
   //Vertical state
   always_comb begin
     {V_top_blank, V_display, V_bot_blank, V_sync}  = 0;
-    if(frame_cnt < `NUM_TOP_BLANK_LINES) V_top_blank = 1; 
-    else if(V_count < `NUM_TOP_BLANK_LINES + `NUM_DISPLAY_LINES) V_display = 1;
-    else if(V_count < `NUM_TOP_BLANK_LINES + `NUM_DISPLAY_LINES + 
-            `NUM_BOT_BLANK_LINES) V_bot_blank  = 1;
+    if(frame_cnt < NUM_TOP_BLANK_LINES) V_top_blank = 1; 
+    else if(frame_cnt < NUM_TOP_BLANK_LINES + NUM_DISPLAY_LINES) V_display = 1;
+    else if(frame_cnt < NUM_TOP_BLANK_LINES + NUM_DISPLAY_LINES + 
+            NUM_BOT_BLANK_LINES) V_bot_blank  = 1;
     else V_sync = 1;
-    assign 
   end
-*/
+  
   
   localparam BG_PIPE_LEN = 3; //we always write 2 ahead of our read
 
@@ -284,7 +293,7 @@ module vdc_HuC6270(input logic clock, reset_N,
   
   always_comb begin
     VD = 0;
-    if(in_vdw) begin
+    if(in_vdw) begin //TODO: make this work correctly with new VSYNC
       VD[8]    = 0; //BG selected
       VD[7:4]  = output_tile.palette_num;
       VD[3:0]  = {output_tile.CG1[15 - cycle_adjusted],

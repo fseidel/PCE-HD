@@ -53,6 +53,8 @@ module gfx_tb;
     while(frame_count < 3) begin
       while(!(vdc.V_state == V_END && vdc.V_cnt == 0 && vdc.EOL)) #10 continue;
       frame_count++;
+      force vdc.BXR  = 4*frame_count;
+      force vdc.BYR  = 4*frame_count;
       while(vdc.V_state == V_END && vdc.V_cnt == 0 && vdc.EOL) #10 continue;
     end
     if(log_enabled) begin
