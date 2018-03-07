@@ -58,35 +58,10 @@ module vdc_HuC6270(input logic clock, reset_N,
             .MD_out(MD_in),
             .MD_in(MD_out)
             );
-
-/*
-  AddressUnit au(.clock(clock),
-                 .MA(MA)
-                );
-*/
   
   logic [15:0] data_in, data_out;
   logic [14:0] address;
   logic wren;
-
-  /*
-  RAMTest bram(.address(address),
-               .clock(clock),
-               .data(data_in),
-               .wren(wren),
-               .q(data_out));
-   */
-
-
-  /*
-  logic [7:0] D_reg;
-  DataBusBuffer(.clock(clock),
-                .reset_N(reset_N),
-                .D(DI),
-                .ld(),
-                .buf_data(D_reg)
-               );
-  */
 
   logic [2:0]  char_cycle; //current position in char cycle
 

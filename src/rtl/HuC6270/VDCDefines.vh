@@ -76,6 +76,28 @@ typedef struct packed {
   logic [15:0] CG1;
 } tile_line_t;
 
+// SATB entry
+typdef struct packed {
+  logic [15:0] y_pos;  // 15-10 unused
+  logic [15:0] x_pos;  // 15-10 unused;
+  logic [15:0] addr;   // Sprite Data VRAM address shifted right 5 bits
+                       // 15-11 unused;
+  logic y_invert;      // Upside-down
+  logic unused;
+  logic [1:0] CGY;     // 00 - sprite is 1 'cell' (16 pixels) high
+                       // 01 - sprite is 2 cells high (32 pixels)
+                       // 10 - invalid
+                       // 11 - sprite is 4 cells high (64 pixels)
+  logic x_invert;      // left-right invert
+  logic [1:0] unused2;
+  logic CGX;           // 0 - sprite is 1 cell wide (16 pixels)
+                       // 1 - sprite is 2 cells wide (32 pixels)
+  logic SPBG;          // Is sprite in foreground (in front of CG)
+                       // or background (behind CG)
+  logic [2:0] unused3;
+  logic [3:0] color;   // which of 16 sprite palettes to use
+} satb_entry_t;
+
 // VDC Status Register
 typedef struct packed {
   logic dummy; // Always set to 0
@@ -174,6 +196,13 @@ typedef struct packed {
 } VWR_t;
 
 
+// $13 - SATB - Sprite Attribute Table 
+// This points to the start address of the sprite attribute 
+// table. All bits used (though no address above $7FFF
+typedef struct packed {
+  logic [15:0] data;
+} SATB_t;
 
-// $03 - 
+
+
 `endif /* VDC_DEFINES_VH */
