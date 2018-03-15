@@ -40,6 +40,7 @@ module vdc_HuC6270(input logic clock, reset_N,
 
 */
 
+  // VRAM Initialization
 
   // VRAM address and data bus wires
   logic [15:0] MA;
@@ -58,10 +59,113 @@ module vdc_HuC6270(input logic clock, reset_N,
             .MD_out(MD_in),
             .MD_in(MD_out)
             );
+ 
+
+  // VDC Registers
+
+  //latch H*R in horizontal blanking, V*R in vertical blanking
+  BXR_t BXR; // $07
+  BYR_t BYR; // $08
+  // MWR_t MWR; // $09 
+  HSR_t HSR; // $0A
+  HDR_t HDR; // $0B
+  VSR_t VSR; // $0C
+  VDR_t VDR; // $0D
+  VCR_t VCR; // $0E
+
+  Register #($bits(BXR), 16'd0) BXR_reg(
+                                        .clk(clock),
+                                        .en(1'b1),
+                                        .rst_l(reset_N),
+                                        .clear(1'b0),
+                                        .D(16'd0),
+                                        .Q(BXR)
+                                       ); 
+
+  Register #($bits(BYR), 16'd0) BYR_reg(
+                                        .clk(clock),
+                                        .en(1'b1),
+                                        .rst_l(reset_N),
+                                        .clear(1'b0),
+                                        .D(16'd0),
+                                        .Q(BYR)
+                                       ); 
+
+  Register #($bits(HSR), 16'h0202) HSR_reg(
+                                        .clk(clock),
+                                        .en(1'b1),
+                                        .rst_l(reset_N),
+                                        .clear(1'b0),
+                                        .D(16'h0202),
+                                        .Q(HSR)
+                                       ); 
+
+  Register #($bits(HDR), 16'h031F) HDR_reg(
+                                        .clk(clock),
+                                        .en(1'b1),
+                                        .rst_l(reset_N),
+                                        .clear(1'b0),
+                                        .D(16'h031F),
+                                        .Q(HDR)
+                                       ); 
+
+  Register #($bits(VSR), 16'h0F02) VSR_reg(
+                                        .clk(clock),
+                                        .en(1'b1),
+                                        .rst_l(reset_N),
+                                        .clear(1'b0),
+                                        .D(16'h0F02),
+                                        .Q(VSR)
+                                      );
+
+  Register #($bits(VDR), 16'h00EF) VDR_reg(
+                                        .clk(clock),
+                                        .en(1'b1),
+                                        .rst_l(reset_N),
+                                        .clear(1'b0),
+                                        .D(16'h00EF),
+                                        .Q(VDR)
+                                      );
+
+  Register #($bits(VCR), 16'h0003) VCR_reg(
+                                        .clk(clock),
+                                        .en(1'b1),
+                                        .rst_l(reset_N),
+                                        .clear(1'b0),
+                                        .D(16'h0003),
+                                        .Q(VCR)
+                                      );
+    
+  logic [4:0] HSW; // Horizontal synchronous pulse width
+  logic [6:0] HDS; // Horizontal display start position - 1
+  logic [6:0] HDW; // Horizontal display width in tiles - 1
+  logic [3:0] HDE; // Horizontal display ending period - 1
+
   
-  logic [15:0] data_in, data_out;
-  logic [14:0] address;
-  logic wren;
+  assign HSW  = HSR.HSW;
+  assign HDS  = HSR.HDS;
+  assign HDW  = HDR.HDW;
+  assign HDE  = HDR.HDE;
+
+  logic [4:0] VSW; // Vertical synchronous pulse width
+  logic [7:0] VDS; // Vertical display start position - 2
+  logic [8:0] VDW; // Vertical display width in pixels - 1
+  logic [7:0] VDE; // Vertical display end position
+  //VCR is passed through
+
+  assign VSW  = VSR.VSW;
+  assign VDS  = VSR.VDS;
+  assign VDW  = VDR.VDW;
+  assign VDE  = VCR.VDE;
+  //VCR is passed through
+
+
+
+
+
+
+
+ 
 
   logic [2:0]  char_cycle; //current position in char cycle
 
@@ -87,51 +191,8 @@ module vdc_HuC6270(input logic clock, reset_N,
   assign y_tl_offset  = y_start[9:3];
 
 
-  //latch H*R in horizontal blanking, V*R in vertical blanking
-  BXR_t BXR; // $07
-  BYR_t BYR; // $08
-  // MWR_t MWR; // $09 
-  HSR_t HSR; // $0A
-  HDR_t HDR; // $0B
-  VSR_t VSR; // $0C
-  VDR_t VDR; // $0D
-  VCR_t VCR; // $0E
- 
-
-  assign BXR = 0; //These can be harcoded to force scroll
-  assign BYR = 0;
 
   
-  //Hardcoded values for Parasol Stars title screen
-  assign HSR  = 16'h0202;
-  assign HDR  = 16'h031F;
-  
-  assign VSR  = 16'h0F02;
-  assign VDR  = 16'h00EF;
-  assign VCR  = 16'h0003;
-    
-  logic [4:0] HSW;
-  logic [6:0] HDS;
-  logic [6:0] HDW;
-  logic [3:0] HDE;
-
-  
-  assign HSW  = HSR.HSW;
-  assign HDS  = HSR.HDS;
-  assign HDW  = HDR.HDW;
-  assign HDE  = HDR.HDE;
-
-  logic [4:0] VSW;
-  logic [7:0] VDS;
-  logic [8:0] VDW;
-  logic [7:0] VDE;
-  //VCR is passed through
-
-  assign VSW  = VSR.VSW;
-  assign VDS  = VSR.VDS;
-  assign VDW  = VDR.VDW;
-  assign VDE  = VCR.VDE;
-  //VCR is passed through
   
 
 
@@ -146,88 +207,134 @@ module vdc_HuC6270(input logic clock, reset_N,
   
   assign HSYNC_n = ~(H_state == H_SYNC);
 
-  //H_state control
+
+  // Next state logic for horizontal state (h_state)
   always_ff @(posedge clock, negedge reset_N) begin
+
     if(~reset_N) begin
-      H_cnt   <= HSW;
-      H_state <= H_SYNC;
-      x_start <= 0;
+      H_cnt   <= HSW;    // Reset to width of HSYNC (will count down)
+      H_state <= H_SYNC; // Start off in HSYNC 
+      x_start <= 0;      
       y_start <= 0;
     end
+
+
     else begin
+
+
       if(char_cycle == 6 && H_state == H_SYNC) begin
         x_start <= BXR; //TODO: HACK! latch at end of DISP???
         y_start <= BYR;
       end
+
+
       if(char_cycle == 7) begin
-        H_cnt <= H_cnt - 1; //default: decrement H_cnt
+
+        // Always decrement our H_cnt at the end of a char_cycle
+        H_cnt <= H_cnt - 1;
+
         case(H_state)
+
+          // If we're at the end of HSYNC, start the WAIT state
           H_SYNC:
             if(H_cnt == 0) begin
-              H_cnt   <= HDS;
+              H_cnt   <= HDS;   // Last for the start position width
               H_state <= H_WAIT;
             end
+
+          // If we're at the end of the WAIT state, start displaying
           H_WAIT:
             if(H_cnt == 0) begin
-              H_cnt   <= HDW;
+              H_cnt   <= HDW;   // Last for the length of the horiz disp
               H_state <= H_DISP;
             end
+
           H_DISP:
             if(H_cnt == 0) begin
-              H_cnt   <= HDE;
+              H_cnt   <= HDE;  // Last for the length of the end period
               H_state <= H_END;
             end
+
           H_END:
             if(H_cnt == 0) begin
-              H_cnt   <= HSW;
+              H_cnt   <= HSW; // Last for the width of HSYNC
               H_state <= H_SYNC;
             end
+
         endcase
       end
     end
   end
 
-  //V_state control
+
+
+  // Vertical state control
+
   logic frame_reset; //set below
+
   always_ff @(posedge clock, negedge reset_N) begin
+
+    // Reset to WAIT state, last for length of state.
     if(~reset_N) begin
       V_cnt   <= VDS + 1;
       V_state <= V_WAIT;
     end
+
     else begin
+
+      // If we're at the end of the line:
       if(EOL) begin
+
+        // Reset for a frame
         if(frame_reset) begin
           V_cnt <= VDS + 1;
           V_state <= V_WAIT;
         end
+
+        // Decrement V_cnt at the end of a line
         else begin
           V_cnt <= V_cnt - 1;
+
           case(V_state)
+
+            // When we're finishing VSYNC (i.e. finising a frame),
+            // restart the frame in the WAIT state again
             V_SYNC:
               if(V_cnt == 0) begin
                 V_cnt   <= VDS + 1;
                 V_state <= V_WAIT;
               end
+
+            // When we finish up the wait state, start on the display state
             V_WAIT: 
               if(V_cnt == 0) begin
                 V_cnt   <= VDW;
                 V_state <= V_DISP;
               end
+
+            // When we're done displaying, start the overscan at the end state
             V_DISP:
               if(V_cnt == 0) begin
                 V_cnt   <= VDE - 1;
                 V_state <= V_END;
               end
+
+            // After the end of the END state, start on VSYNC
             V_END:
               if(V_cnt == 0) begin
                 V_cnt   <= VSW;
                 V_state <= V_SYNC;
               end
+
           endcase
         end
       end
     end
   end
+
+
+  // Separate logic to determine VSYNC
+
 
    //the 4 vertical display states
   logic        V_top_blank, V_display, V_bot_blank, V_sync;
@@ -263,6 +370,11 @@ module vdc_HuC6270(input logic clock, reset_N,
   end
   
   
+
+
+
+
+
   localparam BG_PIPE_LEN = 3; //we always write 2 ahead of our read
 
   tile_line_t [BG_PIPE_LEN-1:0] tile_pipe; //need extra slot for current fetch
@@ -270,9 +382,11 @@ module vdc_HuC6270(input logic clock, reset_N,
   logic [$clog2(BG_PIPE_LEN)-1:0] bg_wr_ptr, bg_rd_ptr;
   
   assign output_tile = tile_pipe[bg_rd_ptr];
-  
-  //VDC -> VCE communications
-  logic        in_vdw; //are we currently in active display?
+ 
+
+
+  // Logic to VCE telling it if we're currently in active display 
+  logic        in_vdw; 
   assign in_vdw = (H_state == H_DISP && V_state == H_DISP);
 
 
