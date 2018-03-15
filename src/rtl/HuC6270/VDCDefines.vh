@@ -77,7 +77,7 @@ typedef struct packed {
 } tile_line_t;
 
 // SATB entry
-typdef struct packed {
+typedef struct packed {
   logic [15:0] y_pos;  // 15-10 unused
   logic [15:0] x_pos;  // 15-10 unused;
   logic [15:0] addr;   // Sprite Data VRAM address shifted right 5 bits
@@ -117,42 +117,7 @@ typedef struct packed {
 
 // Packed register definitions
 
-// MWR - Memory-access Width Register [7:0]
-typedef struct packed {
-  logic CM;                         // CM (unknown - presumably 'Color Mode')
-                                    // MagicKit: "Reserved: always set to 0"
 
-  // These bits are called SCREEN; they control virtual map size
-  logic virtual_screen_height;      // 0 = 256 pixels / 32 tiles
-                                    // 1 = 512 pixels / 64 tiles
-  logic [1:0] virtual_screen_width; // 00 = 256 pixels / 32 tiles
-                                    // 01 = 512 pixels / 64 tiles
-                                    // 1x = 1024 pixels / 128 tiles
-
-  logic [1:0] sprite_dot_width;     // MagicKit: "Reserved - always set to 0"
-  logic [1:0] VRAM_dot_width;       // MagicKit: "Reserved - always set to 0"
-} MWR_t;
-
-
-
-// $05 - CR - Control Register [12:0]
-typedef struct packed {
-  addr_incr_t addr_incr;              // Read/write address auto-increment
-                                      // 00 = normal increment (+1)
-                                      // 01 = +32
-                                      // 10 = +64
-                                      // 11 = +128
-  logic DRAM_refresh;                 // MagicKit: "Reserved - always set to 0" DOUBLE CHECK THIS WITH FORD.
-                                      // I think this changes with a select few games
-  logic [1:0] disp_terminal_outputs;  // MagicKit: "Reserved - always set to 0"
-  logic bgnd_en;                      // Background enable flag (1 = on)
-  logic sprite_en;                    // Sprite enable flag (1 = on)
-  logic [1:0] EX;                     // MagicKit: "Reserved - always set to 0" DOUBLE CHECK THIS
-  logic vblank_int;                   // Vertical blanking interrupt enable flag
-  logic scan_int;                     // Scanline interrupt enable flag
-  logic sprite_overflow;              // Excess number of sprites in line (MagicKit says 16)
-  logic sprite_collision;             // Sprite collision interrupt enable flag
-} CR_t;
 
 
 
@@ -194,6 +159,126 @@ typedef struct packed {
 typedef struct packed {
   logic [15:0] data;
 } VWR_t;
+
+
+
+
+// $05 - CR - Control Register [12:0]
+typedef struct packed {
+  addr_incr_t addr_incr;              // Read/write address auto-increment
+                                      // 00 = normal increment (+1)
+                                      // 01 = +32
+                                      // 10 = +64
+                                      // 11 = +128
+  logic DRAM_refresh;                 // MagicKit: "Reserved - always set to 0" DOUBLE CHECK THIS WITH FORD.
+                                      // I think this changes with a select few games
+  logic [1:0] disp_terminal_outputs;  // MagicKit: "Reserved - always set to 0"
+  logic bgnd_en;                      // Background enable flag (1 = on)
+  logic sprite_en;                    // Sprite enable flag (1 = on)
+  logic [1:0] EX;                     // MagicKit: "Reserved - always set to 0" DOUBLE CHECK THIS
+  logic vblank_int;                   // Vertical blanking interrupt enable flag
+  logic scan_int;                     // Scanline interrupt enable flag
+  logic sprite_overflow;              // Excess number of sprites in line (MagicKit says 16)
+  logic sprite_collision;             // Sprite collision interrupt enable flag
+} CR_t;
+
+
+
+// $06 - RCR - Raster Count Register
+typedef struct packed {
+  logic [9:0] data;
+} RCR_t;
+
+
+// $07 - BXR - Background X-Scroll Register
+typedef struct packed {
+  logic [9:0] data;
+} BXR_t;
+
+
+// $08 - BYR - Background Y-Scroll Register
+typedef struct packed {
+  logic [8:0] data;
+} BYR_t;
+
+// $09 - MWR - Memory-access Width Register [7:0]
+typedef struct packed {
+  logic CM;                         // CM (unknown - presumably 'Color Mode')
+                                    // MagicKit: "Reserved: always set to 0"
+
+  // These bits are called SCREEN; they control virtual map size
+  logic virtual_screen_height;      // 0 = 256 pixels / 32 tiles
+                                    // 1 = 512 pixels / 64 tiles
+  logic [1:0] virtual_screen_width; // 00 = 256 pixels / 32 tiles
+                                    // 01 = 512 pixels / 64 tiles
+                                    // 1x = 1024 pixels / 128 tiles
+
+  logic [1:0] sprite_dot_width;     // MagicKit: "Reserved - always set to 0"
+  logic [1:0] VRAM_dot_width;       // MagicKit: "Reserved - always set to 0"
+} MWR_t;
+
+
+// $0A - HSR - Horizontal Sync Register
+typedef struct packed {
+  logic dummy_a;
+  logic [6:0] HDS;
+  logic [2:0] dummy_b;
+  logic [4:0] HSW;
+} HSR_t;
+
+// $0B - HDR - Horizontal Display Register
+typedef struct packed {
+  logic dummy_a;
+  logic [6:0] HDE;
+  logic dummy_b;
+  logic [6:0] HDW;
+} HDR_t;
+
+// $0C - VPR - Vertical Synchronous Register
+typedef struct packed {
+  logic [7:0] VDS;
+  logic [2:0] dummy;
+  logic [4:0] VSW;
+} VPR_t;
+
+// $0D - VDW - Vertical Display Register
+typedef struct packed {
+  logic [6:0] dummy;
+  logic [8:0] vert_display_width;
+} VDW_t;
+
+// $0E - VCR - Vertical display END position register
+typedef struct packed {
+  logic [7:0] dummy;
+  logic [7:0] vert_display_end;
+} VCR_t;
+
+// $0F - DCR - DMA Control Register
+typedef struct packed {
+  logic [10:0] dummy;
+  logic DSR_DMA;
+  logic dest_addr_inc_en_n;
+  logic src_addr_inc_en_n;
+  logic VRAM_transfer_int_en;
+  logic SATB_transfer_int_en;
+} DCR_t;
+
+
+// $10 - SOUR - (DMA) Source Address Register
+typedef struct packed {
+  logic [15:0] src_addr;
+} SOUR_t;
+
+// $11 - DESR - (DMA) Destination Address Register
+typedef struct packed {
+  logic [15:0] dest_addr;
+} DESR_t;
+
+// $12 - LENR - (DMA) Block Length Register
+typedef struct packed {
+  logic [15:0] DMA_transfer_length;
+} LENR_t;
+
 
 
 // $13 - SATB - Sprite Attribute Table 

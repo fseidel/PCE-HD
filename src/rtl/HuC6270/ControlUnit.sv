@@ -129,7 +129,7 @@ module ControlUnit( input logic   clock,
 
         end
      
-        default:
+        default: begin
           // RETURN $00 IN UNUSED 2'b01 case!
         end 
 

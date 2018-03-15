@@ -2,7 +2,7 @@
 TARGET = simv
 
 # Source files
-SRC = $(wildcard *.vh) $(wildcard *.sv) RAMTest.v
+SRC = $(wildcard *.vh) $(wildcard *.sv) $(wildcard ../HuC6260/*.sv) RAMTest.v
 
 # Set the number of threads to use for parallel compilation (2 * cores)
 CORES = $(shell getconf _NPROCESSORS_ONLN)
