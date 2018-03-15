@@ -456,17 +456,26 @@ module vdc_HuC6270(input logic clock, reset_N,
       cur_row <= 0; //TODO: actually handle this correctly
     end
     else begin
+
       if(V_state == V_WAIT) cur_row <= 0; //latch to 0 right before drawing
+
+      // If we're just about to finish H_DISP mode, we should increment
+      // our cur_row value
       else if(H_state == H_DISP && H_cnt == 0 && char_cycle == 7) begin
         cur_row <= cur_row + 1; //TODO: need to initialize cur_row
       end
+
+      // If we're just about to finish HSYNC, set our bat_ptr
       else if(H_state == H_SYNC && H_cnt == 0 && char_cycle == 7) begin
         bat_ptr <= (x_tl_offset & x_mask) + 
                    ((((cur_row + y_start) >> 3) & y_mask) << y_shift);
       end
+
+      // If we're doing a BG fetch, increment the BAT for the next fetch
       else if(do_BGfetch) begin
         if(char_cycle == 7) bat_ptr <= bat_ptr + 1;
       end
+
     end
   end
 
@@ -479,14 +488,27 @@ module vdc_HuC6270(input logic clock, reset_N,
       bg_rd_ptr  <= 0;
     end
     else begin
+
+      // Increment our char_cycle on every clock
       char_cycle <= char_cycle + 1;
+
+
       if(in_vdw) begin
+
+        // If we are indeed on last char cycle and we're in a DISPLAY mode,
+        // we should increment bg_rd_ptr. Keep looping through the BG pipeline
         if(cycle_adjusted == 7) begin
           if(bg_rd_ptr == (BG_PIPE_LEN-1)) bg_rd_ptr <= 0;
           else bg_rd_ptr <= bg_rd_ptr + 1;
         end
+
       end
+
       else bg_rd_ptr <= 0; //TODO: jump to real start of line
+
+
+      // Loop through the pipeline for writes, increment at the end of
+      // every char cycle
       if(do_BGfetch) begin
         if(char_cycle == 0) begin
           if(bg_wr_ptr == (BG_PIPE_LEN-1)) bg_wr_ptr <= 0;
