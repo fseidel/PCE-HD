@@ -65,20 +65,12 @@ module vdc_HuC6270(input logic clock, reset_N,
 
   logic [2:0]  char_cycle; //current position in char cycle
 
-  //latch H*R in horizontal blanking, V*R in vertical blanking
-  logic [15:0] HSR, HDR, VSR; 
-  logic [8:0]  VDR;
-  logic [7:0]  VCR;
-  
+
   logic [9:0] H_cnt; //horizontal position counter, reused for each phase
   logic [9:0] V_cnt; //vertical position counter, reused for each phase
 
   h_state_t H_state; //state in horizontal line
   v_state_t V_state; //state in vertical screen
-
-  logic [15:0] BXR, BYR; //x and y scroll registers
-  assign BXR = 0; //These can be harcoded to force scroll
-  assign BYR = 0;
 
   logic [9:0]  x_start, y_start, cur_row; //BG start values per line
   logic [7:0]  x_mask, y_mask, y_shift;
@@ -93,6 +85,22 @@ module vdc_HuC6270(input logic clock, reset_N,
   assign x_tl_offset  = x_start[9:3];
   assign y_px_offset  = y_start[2:0];
   assign y_tl_offset  = y_start[9:3];
+
+
+  //latch H*R in horizontal blanking, V*R in vertical blanking
+  BXR_t BXR; // $07
+  BYR_t BYR; // $08
+  // MWR_t MWR; // $09 
+  HSR_t HSR; // $0A
+  HDR_t HDR; // $0B
+  VSR_t VSR; // $0C
+  VDR_t VDR; // $0D
+  VCR_t VCR; // $0E
+ 
+
+  assign BXR = 0; //These can be harcoded to force scroll
+  assign BYR = 0;
+
   
   //Hardcoded values for Parasol Stars title screen
   assign HSR  = 16'h0202;
@@ -108,21 +116,25 @@ module vdc_HuC6270(input logic clock, reset_N,
   logic [3:0] HDE;
 
   
-  assign HSW  = HSR[4:0];
-  assign HDS  = HSR[14:8];
-  assign HDW  = HDR[6:0];
-  assign HDE  = HDR[11:8];
+  assign HSW  = HSR.HSW;
+  assign HDS  = HSR.HDS;
+  assign HDW  = HDR.HDW;
+  assign HDE  = HDR.HDE;
 
   logic [4:0] VSW;
   logic [7:0] VDS;
   logic [8:0] VDW;
+  logic [7:0] VDE;
   //VCR is passed through
 
-  assign VSW  = VSR[4:0];
-  assign VDS  = VSR[15:8];
-  assign VDW  = VDR[8:0];
+  assign VSW  = VSR.VSW;
+  assign VDS  = VSR.VDS;
+  assign VDW  = VDR.VDW;
+  assign VDE  = VCR.VDE;
   //VCR is passed through
   
+
+
   logic       do_BGfetch;            
   assign do_BGfetch = ((H_state == H_DISP) || 
                       (H_state == H_WAIT && H_cnt < 2)) && 
@@ -133,6 +145,7 @@ module vdc_HuC6270(input logic clock, reset_N,
   assign EOL = (char_cycle == 7) && (H_state == H_END) && (H_cnt == 0);
   
   assign HSYNC_n = ~(H_state == H_SYNC);
+
   //H_state control
   always_ff @(posedge clock, negedge reset_N) begin
     if(~reset_N) begin
@@ -202,7 +215,7 @@ module vdc_HuC6270(input logic clock, reset_N,
               end
             V_DISP:
               if(V_cnt == 0) begin
-                V_cnt   <= VCR - 1;
+                V_cnt   <= VDE - 1;
                 V_state <= V_END;
               end
             V_END:

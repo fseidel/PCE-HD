@@ -21,8 +21,8 @@ typedef enum logic [4:0] {
     REG_MWR     = 5'd9,
     REG_HSR     = 5'd10,
     REG_HDR     = 5'd11,
-    REG_VPR     = 5'd12,
-    REG_VDW     = 5'd13,
+    REG_VSR     = 5'd12,
+    REG_VDR     = 5'd13,
     REG_VCR     = 5'd14,
     REG_DCR     = 5'd15,
     REG_SOUR    = 5'd16,
@@ -234,23 +234,23 @@ typedef struct packed {
   logic [6:0] HDW;
 } HDR_t;
 
-// $0C - VPR - Vertical Synchronous Register
+// $0C - VSR - Vertical Synchronous Register
 typedef struct packed {
   logic [7:0] VDS;
   logic [2:0] dummy;
   logic [4:0] VSW;
-} VPR_t;
+} VSR_t;
 
-// $0D - VDW - Vertical Display Register
+// $0D - VDR - Vertical Display Register
 typedef struct packed {
   logic [6:0] dummy;
-  logic [8:0] vert_display_width;
-} VDW_t;
+  logic [8:0] VDW;
+} VDR_t;
 
 // $0E - VCR - Vertical display END position register
 typedef struct packed {
   logic [7:0] dummy;
-  logic [7:0] vert_display_end;
+  logic [7:0] VDE;
 } VCR_t;
 
 // $0F - DCR - DMA Control Register
