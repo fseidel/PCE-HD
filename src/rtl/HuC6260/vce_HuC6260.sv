@@ -68,21 +68,28 @@ module vce_HuC6260( input logic clock, reset_N,
                     (mode[0]) ? clk7_en  : clk5_en;
   
   assign mode  = CR[1:0];
-  initial begin
-    force CR = 2'b00; //force a 5MHz dot clock for now
-  end
   
-  logic [8:0] CDATA, addr, next_addr;
+  logic [8:0] CDATA, CBUF, addr, next_addr;
 
   logic [7:0] data_rd;
 
   assign D  = (~RD_n) ? data_rd : 8'bz;
-  assign data_rd  = (A[0] == 4) ? CRAM[CTA][7:0] :
-                    (A[0] == 5) ? CRAM[CTA][8]   : 8'hFF;
+  assign data_rd  = (A == 4) ? CBUF[7:0] :
+                    (A == 5) ? CBUF[8]   : 8'hFF;
 
   assign CDATA  = CRAM[VD];
 
   logic read, write, prev_RD_n, prev_WR_n;
+
+  //color read buffer handling, SORT OF A HACK
+  //ASSUMES WE HOLD FOR AT LEAST 1 PHYSICAL CYCLE
+  //This is always true for us, but makes me (fseidel) sad
+  //Easy fix is to mux between CRAM and CBUF after first cycle
+  
+  always_ff @(posedge clock, negedge reset_N) begin
+    if(read)
+      CBUF <= CRAM[CTA];
+  end
 
   //read/write edge detection
   always_ff @(posedge clock, negedge reset_N) begin
