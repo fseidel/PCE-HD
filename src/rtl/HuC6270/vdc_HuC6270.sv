@@ -8,7 +8,7 @@
  */
 
 
-module vdc_HuC6270(input logic clock, reset_N,         
+module vdc_HuC6270(input logic clock, reset_N, clock_en,     
                    input logic [7:0]  DI,// Data in, only lower 8 bits used
                    input logic        MRD_n, // "Memory Read Data" from CPU 
                                       // from VRAM
@@ -43,19 +43,38 @@ module vdc_HuC6270(input logic clock, reset_N,
 
   // VRAM address and data bus wires
   logic [15:0] MA;
-  logic [15:0] MD_in, MD_out;
+  logic [15:0] MD_in, MD_out, MD_in_buf, latched_read;
   logic vram_re, vram_we;
 
   //hack to force signals for testing
   assign vram_re  = 1;
   assign vram_we  = 0;
 
+
+  logic   read_delay; //selects whether or not we go for a real read on next 
+                     //clock
+  //TODO: standardize resets
+  always @(posedge clock) begin
+    if(~reset_N) begin
+      latched_read <= 0;
+      read_delay   <= 0;
+    end
+    else if(clock_en) begin
+      latched_read <= MD_in_buf;
+      read_delay   <= 0;
+    end
+    else
+      read_delay   <= 1;
+  end
+
+  assign MD_in = (read_delay) ? latched_read : MD_in_buf;
+  
   VRAM vram(.clock(clock),  //fseidel: This interface needs some work
             .reset_N(reset_N),
             .MA(MA),
             .re(vram_re),
             .we(vram_we),
-            .MD_out(MD_in),
+            .MD_out(MD_in_buf),
             .MD_in(MD_out)
             );
   
@@ -141,7 +160,7 @@ module vdc_HuC6270(input logic clock, reset_N,
       x_start <= 0;
       y_start <= 0;
     end
-    else begin
+    else if(clock_en) begin
       if(char_cycle == 6 && H_state == H_SYNC) begin
         x_start <= BXR; //TODO: HACK! latch at end of DISP???
         y_start <= BYR;
@@ -181,7 +200,7 @@ module vdc_HuC6270(input logic clock, reset_N,
       V_cnt   <= VDS + 1;
       V_state <= V_WAIT;
     end
-    else begin
+    else if(clock_en) begin
       if(EOL) begin
         if(frame_reset) begin
           V_cnt <= VDS + 1;
@@ -232,7 +251,7 @@ module vdc_HuC6270(input logic clock, reset_N,
     if(~reset_N) begin
       frame_cnt <= 0;
     end
-    else if(EOL) begin
+    else if(EOL & clock_en) begin
       frame_cnt <= (frame_reset) ? 0 : frame_cnt + 1;
     end
   end
@@ -293,7 +312,7 @@ module vdc_HuC6270(input logic clock, reset_N,
         tile_pipe[i].CG1         <= 0;
       end
     end
-    else begin
+    else if(clock_en) begin
       if(do_BGfetch) begin
         case(char_cycle)
           2: begin
@@ -328,7 +347,7 @@ module vdc_HuC6270(input logic clock, reset_N,
       bat_ptr <= 0;
       cur_row <= 0; //TODO: actually handle this correctly
     end
-    else begin
+    else if(clock_en) begin
       if(V_state == V_WAIT) cur_row <= 0; //latch to 0 right before drawing
       else if(H_state == H_DISP && H_cnt == 0 && char_cycle == 7) begin
         cur_row <= cur_row + 1; //TODO: need to initialize cur_row
@@ -351,7 +370,7 @@ module vdc_HuC6270(input logic clock, reset_N,
       bg_wr_ptr  <= BG_PIPE_LEN-1; //first write of a line is garbage
       bg_rd_ptr  <= 0;
     end
-    else begin
+    else if(clock_en) begin
       char_cycle <= char_cycle + 1;
       if(in_vdw) begin
         if(cycle_adjusted == 7) begin

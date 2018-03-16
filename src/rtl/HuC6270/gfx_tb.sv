@@ -2,7 +2,7 @@
 `include "VDCDefines.vh"
 
 module gfx_tb;
-  logic clock, reset_N;
+  logic clock, reset_N, clock_en;
   logic [8:0] VD;
   wire  [8:0] D;
 
@@ -18,7 +18,7 @@ module gfx_tb;
   assign B  = VIDEO_B<<5;
   
     
-  vdc_HuC6270 vdc(.clock(clock), .reset_N(reset_N),
+  vdc_HuC6270 vdc(.clock(clock), .reset_N(reset_N), .clock_en(clock_en),
                   .DI(), .MRD_n(), .MWR_n(),
                   .HSYNC_n(HSYNC_n), .VSYNC_n(VSYNC_n),
                   .CS_n(), .WR_n(), .RD_n(), .EX_8_16(), .A(), .VD(VD), .DO(),
@@ -28,7 +28,7 @@ module gfx_tb;
                   .VD(VD), .HSYN(HSYNC_n), .VSYN(VSYNC_n),
                   .A(), .D(D),
                   .VIDEO_G(VIDEO_G), .VIDEO_R(VIDEO_R), .VIDEO_B(VIDEO_B),
-                  .CK(), .RD_n(), .WR_n(), .CS_n(),
+                  .clock_en(clock_en), .RD_n(), .WR_n(), .CS_n(),
                   .address_mode());
 
   string filename = "log.txt";
@@ -48,7 +48,7 @@ module gfx_tb;
     do_write     = 0;
     clock        = 0;
     reset_N      = 1'b0;
-    #10 reset_N <= 1'b1;
+    #30 reset_N <= 1'b1;
     do_write    <= 1'b1;
     while(frame_count < 3) begin
       while(!(vdc.V_state == V_END && vdc.V_cnt == 0 && vdc.EOL)) #10 continue;
@@ -69,7 +69,7 @@ module gfx_tb;
     forever begin
       #10 clock  = ~clock;
       cycle++;
-      if(log_enabled && do_write)
+      if(log_enabled && do_write && clock_en)
         $fwrite(f, "%3d %3d %3d %b %b\n", R, G, B, HSYNC_n, VSYNC_n);
     end
   end
