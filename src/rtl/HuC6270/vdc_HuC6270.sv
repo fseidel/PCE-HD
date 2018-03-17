@@ -196,7 +196,7 @@ module vdc_HuC6270(input logic clock, reset_N,
 
 
 
-
+  localparam num_sprites = 16;
   logic first_frame_done; 
 
 
@@ -208,7 +208,7 @@ module vdc_HuC6270(input logic clock, reset_N,
   // SAT Fetch
   logic do_SATfetch;
   assign do_SATfetch = ((V_state == V_SYNC));
-  satb_entry_t satb_entries[2];
+  satb_entry_t satb_entries[num_sprites];
   logic SATfetch_cur_entry;
 
 
@@ -218,12 +218,65 @@ module vdc_HuC6270(input logic clock, reset_N,
                           (V_state == V_DISP) && 
                           ~do_BGfetch &&
                           first_frame_done;
-  logic [15:0] sprite_data[2][256];
-  logic cur_sprite;
+  logic [15:0] sprite_data[num_sprites][512];
+  logic  cur_sprite_fetch;
 
-  logic [10:0] sprite_num_words;
-  assign sprite_num_words = 11'd256;
-  logic [7:0] sprite_word_count;
+  logic [9:0] sprite_word_count;
+  logic [9:0] sprite_num_words;
+
+  always_comb begin
+
+    sprite_num_words = 10'd0;
+
+    case (satb_entries[cur_sprite_fetch].CGY) 
+
+      HEIGHT_16: begin
+
+        case (satb_entries[cur_sprite_fetch].CGX)
+
+          // 16 x 16
+          WIDTH_16: sprite_num_words = 10'd64;
+
+          // 32 x 16
+          WIDTH_32: sprite_num_words = 10'd128;
+
+        endcase
+
+      end
+
+      HEIGHT_32: begin
+
+        case (satb_entries[cur_sprite_fetch].CGX)
+
+          // 16 x 32
+          WIDTH_16: sprite_num_words = 10'd128;
+
+          // 32 x 32
+          WIDTH_32: sprite_num_words = 10'd256;
+
+        endcase
+
+      end
+
+      HEIGHT_64: begin
+
+        case (satb_entries[cur_sprite_fetch].CGX)
+
+          // 16 x 64
+          WIDTH_16: sprite_num_words = 10'd256;
+
+          // 32 x 64
+          WIDTH_32: sprite_num_words = 10'd512;
+
+        endcase
+
+      end
+
+
+    endcase
+
+  end
+
 
 /*
   // Sprite fetching FSM
@@ -499,18 +552,18 @@ module vdc_HuC6270(input logic clock, reset_N,
   logic [2:0]  cycle_adjusted;
   assign cycle_adjusted = char_cycle + x_px_offset;
   
-  logic [15:0] top[2];
-  logic [15:0] bot[2];
-  logic [15:0] left[2];
-  logic [15:0] right[2];
-  logic [4:0] sprite_idx_x[2];
-  logic [5:0] sprite_idx_y[2];
+  logic [15:0] top[num_sprites];
+  logic [15:0] bot[num_sprites];
+  logic [15:0] left[num_sprites];
+  logic [15:0] right[num_sprites];
+  logic [4:0] sprite_idx_x[num_sprites];
+  logic [5:0] sprite_idx_y[num_sprites];
 //  assign sprite_idx_x = x_idx - left[1];
 //  assign sprite_idx_y = y_idx - top[1];
 
   genvar i;
   generate 
-    for (i = 0; i < 2; i++) begin : ra
+    for (i = 0; i < num_sprites; i++) begin : ra
       assign top[i] = satb_entries[i].y_pos - 64;
       assign bot[i] = satb_entries[i].y_pos - 64 + 15'd32;
       assign left[i] = satb_entries[i].x_pos - 8*(HSW + HDS);
@@ -527,12 +580,12 @@ module vdc_HuC6270(input logic clock, reset_N,
   assign right[1] = satb_entries[1].x_pos - 8*(HSW +HDS) + 15'd32;
 */
 
-  logic [15:0] cur_word_idx[2];
-  logic [3:0] cur_pix[2];
+  logic [15:0] cur_word_idx[num_sprites];
+  logic [3:0] cur_pix[num_sprites];
 
   genvar j;
   generate
-    for (j = 0; j < 2; j++) begin : ja
+    for (j = 0; j < num_sprites; j++) begin : ja
       always_comb begin
         if (satb_entries[j].CGX == WIDTH_32) begin
           cur_word_idx[j] = ((sprite_idx_y[j] >> 4) << 7) + (sprite_idx_y[j] % 16) + ((sprite_idx_x[j] / 16) << 6);
@@ -624,7 +677,7 @@ module vdc_HuC6270(input logic clock, reset_N,
       end
       sprite_word_count <= 0;
       SATfetch_cur_entry <= 0;
-      cur_sprite <= 0;
+      cur_sprite_fetch <= 0;
     end
     else begin
       if(do_BGfetch) begin
@@ -653,10 +706,20 @@ module vdc_HuC6270(input logic clock, reset_N,
 
       else if (do_Spritefetch) begin
         if (!(char_cycle & 3'd1)) begin
-          sprite_data[cur_sprite][sprite_word_count] <= MD_in; 
-          if (sprite_word_count == 255)
-            cur_sprite <= cur_sprite + 1;
-          sprite_word_count <= sprite_word_count + 1;
+          sprite_data[cur_sprite_fetch][sprite_word_count] <= MD_in; 
+          if (sprite_word_count == sprite_num_words - 1) begin
+
+           if (cur_sprite_fetch == 1) begin
+//            if (cur_sprite_fetch == $clog2(num_sprites) - 1) begin
+              cur_sprite_fetch <= 0;
+            end else begin
+              cur_sprite_fetch <= cur_sprite_fetch + 1;
+            end
+            sprite_word_count <= 0;
+          end
+          else begin
+            sprite_word_count <= sprite_word_count + 1;
+          end
         end
       end
 
@@ -686,7 +749,7 @@ module vdc_HuC6270(input logic clock, reset_N,
     end
 
     else if (do_Spritefetch) begin
-      if (char_cycle & 1) MA = (satb_entries[cur_sprite].addr << 5) + sprite_word_count;
+      if (char_cycle & 1) MA = (satb_entries[cur_sprite_fetch].addr << 5) + sprite_word_count;
       else MA = 0;
     end
 
