@@ -209,7 +209,7 @@ module vdc_HuC6270(input logic clock, reset_N,
   logic do_SATfetch;
   assign do_SATfetch = ((V_state == V_SYNC));
   satb_entry_t satb_entries[num_sprites];
-  logic SATfetch_cur_entry;
+  logic [$clog2(num_sprites) - 1 : 0] SATfetch_cur_entry;
 
 
   // Sprite Data Fetch
@@ -698,7 +698,7 @@ module vdc_HuC6270(input logic clock, reset_N,
           6: satb_entries[SATfetch_cur_entry][31:16] <= MD_in;
           0: begin
             satb_entries[SATfetch_cur_entry][15:0]  <= MD_in;
-            SATfetch_cur_entry <= SATfetch_cur_entry + 1'd1;
+            SATfetch_cur_entry <= SATfetch_cur_entry + 1;
           end
         endcase
       end
