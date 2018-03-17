@@ -41,7 +41,7 @@ module gfx_tb;
     cycle              = 0;
     frame_count        = 0;
     if(log_enabled) f  = $fopen(filename, "w");
-    $monitor("x: %d y: %d y:%b", vdc.block_x_idx, vdc.block_y_idx, vdc.first_sprite.CGY);
+    //$monitor("x: %d y: %d y:%b", vdc.block_x_idx, vdc.block_y_idx, vdc.first_sprite.CGY);
     if(!silent) begin
       $monitor("cycle: %d, MA: %x, VD: %x, RGB: (%x %x %x), V_state: %s",
                cycle, vdc.MA, VD, R, G, B, vdc.V_state);
@@ -69,11 +69,16 @@ module gfx_tb;
       $system({"gzip ", filename});
     end
 
-    $display("y_pos: %x", vdc.first_sprite.y_pos);
-    $display("x_pos: %x", vdc.first_sprite.x_pos);
-    $display("addr:  %x", vdc.first_sprite.addr);
-    $display("CGY:   %b", vdc.first_sprite.CGY);
-    $display("CGX:   %b", vdc.first_sprite.CGX);
+    $display("y_pos: %x", vdc.satb_entries[0].y_pos);
+    $display("x_pos: %x", vdc.satb_entries[0].x_pos);
+    $display("addr:  %x", vdc.satb_entries[0].addr);
+    $display("CGY:   %b", vdc.satb_entries[0].CGY);
+    $display("CGX:   %b", vdc.satb_entries[0].CGX);
+    $display("y_pos: %x", vdc.satb_entries[1].y_pos);
+    $display("x_pos: %x", vdc.satb_entries[1].x_pos);
+    $display("addr:  %x", vdc.satb_entries[1].addr);
+    $display("CGY:   %b", vdc.satb_entries[1].CGY);
+    $display("CGX:   %b", vdc.satb_entries[1].CGX);
     $display("word0: %x", vdc.sprite_data[0]);
     $display("word1: %x", vdc.sprite_data[1]);
     $display("word0: %x", vdc.sprite_data[2]);

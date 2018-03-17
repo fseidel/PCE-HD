@@ -208,7 +208,8 @@ module vdc_HuC6270(input logic clock, reset_N,
   // SAT Fetch
   logic do_SATfetch;
   assign do_SATfetch = ((V_state == V_SYNC));
-  satb_entry_t first_sprite;
+  satb_entry_t satb_entries[2];
+  logic SATfetch_cur_entry;
 
 
   // Sprite Data Fetch
@@ -218,16 +219,17 @@ module vdc_HuC6270(input logic clock, reset_N,
                           ~do_BGfetch &&
                           first_frame_done;
   logic [15:0] sprite_data[256];
-
-  // Sprite fetching FSM
-  logic [5:0] block_y_idx;
-  logic [2:0]  block_x_idx;
+  logic cur_sprite;
 
   logic [10:0] sprite_num_words;
   assign sprite_num_words = 11'd256;
   logic [7:0] sprite_word_count;
 
 /*
+  // Sprite fetching FSM
+  logic [5:0] block_y_idx;
+  logic [2:0]  block_x_idx;
+
   logic [15:0] addr_offset;
   always_comb begin
     if (first_sprite.CGX == WIDTH_16) begin
@@ -268,7 +270,7 @@ module vdc_HuC6270(input logic clock, reset_N,
 
         end
 
-        // If we're 32 wide and we're at the end of a line, loop around
+                    SATfetch_cur_entry <= SATfetch_cur_entry + 1'd1;// If we're 32 wide and we're at the end of a line, loop around
         else if (block_x_idx == 3'd7 && first_sprite.CGX == WIDTH_32) begin
           block_x_idx <= 3'd0;
           if ((block_y_idx == 6'd15 && first_sprite.CGY == HEIGHT_16) ||
@@ -498,10 +500,10 @@ module vdc_HuC6270(input logic clock, reset_N,
   assign cycle_adjusted = char_cycle + x_px_offset;
   
   logic [15:0] top, bot, left, right;
-  assign top = first_sprite.y_pos - 64;
-  assign bot = first_sprite.y_pos - 64 + 15'd32;
-  assign left = first_sprite.x_pos - 8*(HSW + HDS);
-  assign right = first_sprite.x_pos - 8*(HSW +HDS) + 15'd32;
+  assign top = satb_entries[0].y_pos - 64;
+  assign bot = satb_entries[0].y_pos - 64 + 15'd32;
+  assign left = satb_entries[0].x_pos - 8*(HSW + HDS);
+  assign right = satb_entries[0].x_pos - 8*(HSW +HDS) + 15'd32;
 
   logic [4:0] sprite_idx_x;
   logic [5:0] sprite_idx_y;
@@ -512,7 +514,7 @@ module vdc_HuC6270(input logic clock, reset_N,
   logic [3:0] cur_pix;
 
   always_comb begin
-    if (first_sprite.CGX == WIDTH_32) begin
+    if (satb_entries[0].CGX == WIDTH_32) begin
       cur_word_idx = ((sprite_idx_y >> 4) << 7) + (sprite_idx_y % 16) + ((sprite_idx_x / 16) << 6);
     end else begin
       cur_word_idx = 0;
@@ -531,7 +533,7 @@ module vdc_HuC6270(input logic clock, reset_N,
       if ((left <= x_idx && x_idx < right && top <= y_idx && y_idx < bot) &&
           first_frame_done) begin
         VD[8] = 1;
-        VD[7:4] = first_sprite.color;
+        VD[7:4] = satb_entries[0].color;
         VD[3:0] = cur_pix;
       end else begin
       	VD[8]    = 0; //BG selected
@@ -564,6 +566,7 @@ module vdc_HuC6270(input logic clock, reset_N,
         tile_pipe[i].CG1         <= 0;
       end
       sprite_word_count <= 0;
+      SATfetch_cur_entry <= 0;
     end
     else begin
       if(do_BGfetch) begin
@@ -579,10 +582,13 @@ module vdc_HuC6270(input logic clock, reset_N,
 
       else if (do_SATfetch) begin
         case(char_cycle)
-          2: first_sprite[63:48] <= MD_in;
-          4: first_sprite[47:32] <= MD_in;
-          6: first_sprite[31:16] <= MD_in;
-          0: first_sprite[15:0]  <= MD_in;
+          2: satb_entries[SATfetch_cur_entry][63:48] <= MD_in;
+          4: satb_entries[SATfetch_cur_entry][47:32] <= MD_in;
+          6: satb_entries[SATfetch_cur_entry][31:16] <= MD_in;
+          0: begin
+            satb_entries[SATfetch_cur_entry][15:0]  <= MD_in;
+            SATfetch_cur_entry <= SATfetch_cur_entry + 1'd1;
+          end
         endcase
       end
 
@@ -612,16 +618,16 @@ module vdc_HuC6270(input logic clock, reset_N,
 
     else if (do_SATfetch) begin
       case(char_cycle)
-        1: MA = SATB.data;
-        3: MA = SATB.data + 1;
-        5: MA = SATB.data + 2;
-        7: MA = SATB.data + 3;
+        1: MA = SATB.data     + (4 * SATfetch_cur_entry);
+        3: MA = SATB.data + 1+ (4 * SATfetch_cur_entry);
+        5: MA = SATB.data + 2+ (4 * SATfetch_cur_entry);
+        7: MA = SATB.data + 3+ (4 * SATfetch_cur_entry);
         default: MA = 0;
       endcase
     end
 
     else if (do_Spritefetch) begin
-      if (char_cycle & 1) MA = (first_sprite.addr << 5) + sprite_word_count;
+      if (char_cycle & 1) MA = (satb_entries[SATfetch_cur_entry].addr << 5) + sprite_word_count;
       else MA = 0;
     end
 
