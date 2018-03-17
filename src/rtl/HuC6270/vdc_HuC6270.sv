@@ -218,7 +218,7 @@ module vdc_HuC6270(input logic clock, reset_N,
                           (V_state == V_DISP) && 
                           ~do_BGfetch &&
                           first_frame_done;
-  logic [15:0] sprite_data[256];
+  logic [15:0] sprite_data[2][256];
   logic cur_sprite;
 
   logic [10:0] sprite_num_words;
@@ -499,49 +499,105 @@ module vdc_HuC6270(input logic clock, reset_N,
   logic [2:0]  cycle_adjusted;
   assign cycle_adjusted = char_cycle + x_px_offset;
   
-  logic [15:0] top, bot, left, right;
-  assign top = satb_entries[0].y_pos - 64;
-  assign bot = satb_entries[0].y_pos - 64 + 15'd32;
-  assign left = satb_entries[0].x_pos - 8*(HSW + HDS);
-  assign right = satb_entries[0].x_pos - 8*(HSW +HDS) + 15'd32;
+  logic [15:0] top[2];
+  logic [15:0] bot[2];
+  logic [15:0] left[2];
+  logic [15:0] right[2];
+  logic [4:0] sprite_idx_x[2];
+  logic [5:0] sprite_idx_y[2];
+//  assign sprite_idx_x = x_idx - left[1];
+//  assign sprite_idx_y = y_idx - top[1];
 
-  logic [4:0] sprite_idx_x;
-  logic [5:0] sprite_idx_y;
-  assign sprite_idx_x = x_idx - left;
-  assign sprite_idx_y = y_idx - top;
+  genvar i;
+  generate 
+    for (i = 0; i < 2; i++) begin : ra
+      assign top[i] = satb_entries[i].y_pos - 64;
+      assign bot[i] = satb_entries[i].y_pos - 64 + 15'd32;
+      assign left[i] = satb_entries[i].x_pos - 8*(HSW + HDS);
+      assign right[i] = satb_entries[i].x_pos - 8*(HSW +HDS) + 15'd32;
 
-  logic [15:0] cur_word_idx;
-  logic [3:0] cur_pix;
+      assign sprite_idx_x[i] = x_idx - left[i];
+      assign sprite_idx_y[i] = y_idx - top[i];
+    end : ra
+  endgenerate
+/*
+  assign top[1] = satb_entries[1].y_pos - 64;
+  assign bot[1] = satb_entries[1].y_pos - 64 + 15'd32;
+  assign left[1] = satb_entries[1].x_pos - 8*(HSW + HDS);
+  assign right[1] = satb_entries[1].x_pos - 8*(HSW +HDS) + 15'd32;
+*/
 
-  always_comb begin
-    if (satb_entries[0].CGX == WIDTH_32) begin
-      cur_word_idx = ((sprite_idx_y >> 4) << 7) + (sprite_idx_y % 16) + ((sprite_idx_x / 16) << 6);
-    end else begin
-      cur_word_idx = 0;
-    end
-  end
+  logic [15:0] cur_word_idx[2];
+  logic [3:0] cur_pix[2];
 
-  assign cur_pix = {sprite_data[cur_word_idx     ][15 - (sprite_idx_x % 16)],
-                    sprite_data[cur_word_idx + 16][15 - (sprite_idx_x % 16)],
-                    sprite_data[cur_word_idx + 32][15 - (sprite_idx_x % 16)],
-                    sprite_data[cur_word_idx + 48][15 - (sprite_idx_x % 16)]};
+  genvar j;
+  generate
+    for (j = 0; j < 2; j++) begin : ja
+      always_comb begin
+        if (satb_entries[j].CGX == WIDTH_32) begin
+          cur_word_idx[j] = ((sprite_idx_y[j] >> 4) << 7) + (sprite_idx_y[j] % 16) + ((sprite_idx_x[j] / 16) << 6);
+        end else begin
+          cur_word_idx[j] = 0;
+        end
+      end
+
+      assign cur_pix[j] = {sprite_data[j][cur_word_idx[j]     ][15 - (sprite_idx_x[j] % 16)],
+                        sprite_data[j][cur_word_idx[j] + 16][15 - (sprite_idx_x[j] % 16)],
+                        sprite_data[j][cur_word_idx[j] + 32][15 - (sprite_idx_x[j] % 16)],
+                        sprite_data[j][cur_word_idx[j] + 48][15 - (sprite_idx_x[j] % 16)]};
+      
+    end : ja
+  endgenerate
+
+  logic [3:0] tile_pix;
+  assign tile_pix = {output_tile.CG1[15 - cycle_adjusted],
+                  output_tile.CG1[7 - cycle_adjusted], 
+                  output_tile.CG0[15 - cycle_adjusted],
+                  output_tile.CG0[7 - cycle_adjusted]};
+
 
   always_comb begin
     VD = 0;
     if(in_vdw) begin //TODO: make this work correctly with new VSYNC
 //      if ((left <= x_idx && x_idx < right && top <= y_idx && y_idx < bot) &&
-      if ((left <= x_idx && x_idx < right && top <= y_idx && y_idx < bot) &&
+      if ((left[1] <= x_idx && x_idx < right[1] && top[1] <= y_idx && y_idx < bot[1]) &&
           first_frame_done) begin
+
+        if (tile_pix != 0) begin
+          VD[8] = 0;
+          VD[7:4] = output_tile.palette_num;
+          VD[3:0] = tile_pix;
+        end else begin
+
+        VD[8] = 1;
+        VD[7:4] = satb_entries[1].color;
+        VD[3:0] = cur_pix[1];
+        end
+      end else if ((left[0] <= x_idx && x_idx < right[0] && top[0] <= y_idx && y_idx < bot[0]) &&
+          first_frame_done) begin
+/*
+        if (x_idx == left[0] && y_idx == top[0]) begin
+          $display("here: %x", cur_pix[0]);
+          $display("%x", {output_tile.CG1[15 - cycle_adjusted],output_tile.CG1[7 - cycle_adjusted], output_tile.CG0[15 - cycle_adjusted],output_tile.CG0[7 - cycle_adjusted]});
+        end
+*/
+
+        if (tile_pix != 0) begin
+          VD[8] = 0;
+          VD[7:4] = output_tile.palette_num;
+          VD[3:0] = tile_pix;
+        end else begin
         VD[8] = 1;
         VD[7:4] = satb_entries[0].color;
-        VD[3:0] = cur_pix;
+        VD[3:0] = cur_pix[0]; 
+        end
       end else begin
       	VD[8]    = 0; //BG selected
       	VD[7:4]  = output_tile.palette_num;
-      	VD[3:0]  = {output_tile.CG1[15 - cycle_adjusted],
-                  output_tile.CG1[7 - cycle_adjusted], 
-                  output_tile.CG0[15 - cycle_adjusted],
-                  output_tile.CG0[7 - cycle_adjusted]};
+      	VD[3:0]  = tile_pix;
+        if (tile_pix == 0) begin
+          VD[7:4] = 0;
+        end
       end
     end
   end
@@ -556,6 +612,7 @@ module vdc_HuC6270(input logic clock, reset_N,
   bat_entry_t curbat;
   assign curbat  = MD_in;
   assign fetch_row = y_px_offset + cur_row;
+  logic [15:0] bat_ptr;
   
   //background pipeline
   always_ff @(posedge clock, negedge reset_N) begin
@@ -567,6 +624,7 @@ module vdc_HuC6270(input logic clock, reset_N,
       end
       sprite_word_count <= 0;
       SATfetch_cur_entry <= 0;
+      cur_sprite <= 0;
     end
     else begin
       if(do_BGfetch) begin
@@ -595,7 +653,9 @@ module vdc_HuC6270(input logic clock, reset_N,
 
       else if (do_Spritefetch) begin
         if (!(char_cycle & 3'd1)) begin
-          sprite_data[sprite_word_count] <= MD_in; 
+          sprite_data[cur_sprite][sprite_word_count] <= MD_in; 
+          if (sprite_word_count == 255)
+            cur_sprite <= cur_sprite + 1;
           sprite_word_count <= sprite_word_count + 1;
         end
       end
@@ -603,7 +663,6 @@ module vdc_HuC6270(input logic clock, reset_N,
     end
   end
   
-  logic [15:0] bat_ptr;
   //VRAM address control
   always_comb begin
     //assume we have dot width 00
@@ -627,7 +686,7 @@ module vdc_HuC6270(input logic clock, reset_N,
     end
 
     else if (do_Spritefetch) begin
-      if (char_cycle & 1) MA = (satb_entries[SATfetch_cur_entry].addr << 5) + sprite_word_count;
+      if (char_cycle & 1) MA = (satb_entries[cur_sprite].addr << 5) + sprite_word_count;
       else MA = 0;
     end
 

@@ -59,8 +59,8 @@ module gfx_tb;
         end
       end
       frame_count++;
-      force vdc.BXR  = 4*frame_count;
-      force vdc.BYR  = 4*frame_count;
+//      force vdc.BXR  = 4*frame_count;
+//      force vdc.BYR  = 4*frame_count;
       while(vdc.V_state == V_END && vdc.V_cnt == 0 && vdc.EOL) #10 continue;
     end
     if(log_enabled) begin
@@ -79,7 +79,7 @@ module gfx_tb;
     $display("addr:  %x", vdc.satb_entries[1].addr);
     $display("CGY:   %b", vdc.satb_entries[1].CGY);
     $display("CGX:   %b", vdc.satb_entries[1].CGX);
-    $display("word0: %x", vdc.sprite_data[0]);
+/*    $display("word0: %x", vdc.sprite_data[0]);
     $display("word1: %x", vdc.sprite_data[1]);
     $display("word0: %x", vdc.sprite_data[2]);
     $display("word1: %x", vdc.sprite_data[3]);
@@ -90,7 +90,7 @@ module gfx_tb;
     $display("word0: %x", vdc.sprite_data[8]);
     $display("word1: %x", vdc.sprite_data[9]);
     $display("word0: %x", vdc.sprite_data[10]);
-    $display("word1: %x", vdc.sprite_data[11]);
+    $display("word1: %x", vdc.sprite_data[11]); */
     $finish;
   end
 

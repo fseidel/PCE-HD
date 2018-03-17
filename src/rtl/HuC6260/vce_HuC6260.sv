@@ -167,16 +167,18 @@ module vce_HuC6260( input logic clock, reset_N,
       VIDEO_R <= 0;
       VIDEO_G <= 0;
     end
-    else if(VD) begin
+    else begin
       VIDEO_B <= CDATA[2:0];
       VIDEO_R <= CDATA[5:3];
       VIDEO_G <= CDATA[8:6];
     end
+/*
     else begin //TODO: handle background color + blanking
       VIDEO_B <= 0;
       VIDEO_R <= 0;
       VIDEO_G <= 0;
     end
+*/
   end
 
 
