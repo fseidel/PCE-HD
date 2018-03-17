@@ -76,6 +76,19 @@ typedef struct packed {
   logic [15:0] CG1;
 } tile_line_t;
 
+
+typedef enum logic {
+    WIDTH_16 = 1'd0,
+    WIDTH_32 = 1'd1
+} CGX_t;
+
+typedef enum logic [1:0] {
+    HEIGHT_16 = 2'd0,
+    HEIGHT_32 = 2'd1,
+    HEIGHT_X  = 2'd2,
+    HEIGHT_64 = 2'd3
+} CGY_t;
+
 // SATB entry
 typedef struct packed {
   logic [15:0] y_pos;  // 15-10 unused
@@ -84,13 +97,13 @@ typedef struct packed {
                        // 15-11 unused;
   logic y_invert;      // Upside-down
   logic unused;
-  logic [1:0] CGY;     // 00 - sprite is 1 'cell' (16 pixels) high
+  CGY_t       CGY;     // 00 - sprite is 1 'cell' (16 pixels) high
                        // 01 - sprite is 2 cells high (32 pixels)
                        // 10 - invalid
                        // 11 - sprite is 4 cells high (64 pixels)
   logic x_invert;      // left-right invert
   logic [1:0] unused2;
-  logic CGX;           // 0 - sprite is 1 cell wide (16 pixels)
+  CGX_t CGX;           // 0 - sprite is 1 cell wide (16 pixels)
                        // 1 - sprite is 2 cells wide (32 pixels)
   logic SPBG;          // Is sprite in foreground (in front of CG)
                        // or background (behind CG)

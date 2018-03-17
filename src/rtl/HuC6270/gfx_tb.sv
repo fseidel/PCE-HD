@@ -41,6 +41,7 @@ module gfx_tb;
     cycle              = 0;
     frame_count        = 0;
     if(log_enabled) f  = $fopen(filename, "w");
+    $monitor("x: %d y: %d y:%b", vdc.block_x_idx, vdc.block_y_idx, vdc.first_sprite.CGY);
     if(!silent) begin
       $monitor("cycle: %d, MA: %x, VD: %x, RGB: (%x %x %x), V_state: %s",
                cycle, vdc.MA, VD, R, G, B, vdc.V_state);
@@ -51,7 +52,12 @@ module gfx_tb;
     #10 reset_N <= 1'b1;
     do_write    <= 1'b1;
     while(frame_count < 3) begin
-      while(!(vdc.V_state == V_END && vdc.V_cnt == 0 && vdc.EOL)) #10 continue;
+      while(!(vdc.V_state == V_END && vdc.V_cnt == 0 && vdc.EOL)) begin
+        #20;
+        if (vdc.do_Spritefetch) begin
+//          $display("MA: %x, MD_in: %x, sprite_word_count: %d char_cycle: %d", vdc.MA, vdc.MD_in, vdc.sprite_word_count, vdc.char_cycle);
+        end
+      end
       frame_count++;
       force vdc.BXR  = 4*frame_count;
       force vdc.BYR  = 4*frame_count;
@@ -62,6 +68,24 @@ module gfx_tb;
       $fclose(f);
       $system({"gzip ", filename});
     end
+
+    $display("y_pos: %x", vdc.first_sprite.y_pos);
+    $display("x_pos: %x", vdc.first_sprite.x_pos);
+    $display("addr:  %x", vdc.first_sprite.addr);
+    $display("CGY:   %b", vdc.first_sprite.CGY);
+    $display("CGX:   %b", vdc.first_sprite.CGX);
+    $display("word0: %x", vdc.sprite_data[0]);
+    $display("word1: %x", vdc.sprite_data[1]);
+    $display("word0: %x", vdc.sprite_data[2]);
+    $display("word1: %x", vdc.sprite_data[3]);
+    $display("word0: %x", vdc.sprite_data[4]);
+    $display("word1: %x", vdc.sprite_data[5]);
+    $display("word0: %x", vdc.sprite_data[6]);
+    $display("word1: %x", vdc.sprite_data[7]);
+    $display("word0: %x", vdc.sprite_data[8]);
+    $display("word1: %x", vdc.sprite_data[9]);
+    $display("word0: %x", vdc.sprite_data[10]);
+    $display("word1: %x", vdc.sprite_data[11]);
     $finish;
   end
 

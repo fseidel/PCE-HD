@@ -72,6 +72,8 @@ module vdc_HuC6270(input logic clock, reset_N,
   VSR_t VSR; // $0C
   VDR_t VDR; // $0D
   VCR_t VCR; // $0E
+  SATB_t SATB; // $13
+  assign SATB.data = 16'h7F00; // TODO: SET THIS
 
   Register #($bits(BXR), 16'd0) BXR_reg(
                                         .clk(clock),
@@ -165,6 +167,7 @@ module vdc_HuC6270(input logic clock, reset_N,
 
 
 
+
  
 
   logic [2:0]  char_cycle; //current position in char cycle
@@ -192,14 +195,109 @@ module vdc_HuC6270(input logic clock, reset_N,
 
 
 
-  
-  
+
+
+  logic first_frame_done; 
 
 
   logic       do_BGfetch;            
   assign do_BGfetch = ((H_state == H_DISP) || 
                       (H_state == H_WAIT && H_cnt < 2)) && 
                       (V_state == V_DISP);
+
+  // SAT Fetch
+  logic do_SATfetch;
+  assign do_SATfetch = ((V_state == V_SYNC));
+  satb_entry_t first_sprite;
+
+
+  // Sprite Data Fetch
+  logic do_Spritefetch;
+  assign do_Spritefetch = ((H_state == H_SYNC) || (H_state == H_WAIT) || (H_state == H_END)) &&
+                          (V_state == V_DISP) && 
+                          ~do_BGfetch &&
+                          first_frame_done;
+  logic [15:0] sprite_data[256];
+
+  // Sprite fetching FSM
+  logic [5:0] block_y_idx;
+  logic [2:0]  block_x_idx;
+
+  logic [10:0] sprite_num_words;
+  assign sprite_num_words = 11'd256;
+  logic [7:0] sprite_word_count;
+
+/*
+  logic [15:0] addr_offset;
+  always_comb begin
+    if (first_sprite.CGX == WIDTH_16) begin
+      addr_offset = (block_x_idx << 4) + block_y_idx;
+    end
+
+    else begin
+      addr_offset = (block_x_idx << 4) + ((block_y_idx >> 4) << 7) + block_y_idx;
+    end
+  end
+
+  
+  always_ff @(posedge clock, negedge reset_N) begin
+    if (~reset_N) begin
+      block_x_idx <= 3'd0;
+      block_y_idx <= 6'd0;
+    end
+
+    else begin
+
+      // Only increment anything if we're even spriteFetching
+      if (do_Spritefetch && (char_cycle & 1)) begin
+
+
+        // If we're 16 wide and we're at the end of a line, loop around
+        if ((block_x_idx == 3'd3) && (first_sprite.CGX == WIDTH_16)) begin
+          block_x_idx <= 3'd0;
+
+          if ((block_y_idx == 6'd15 && first_sprite.CGY == HEIGHT_16) ||
+              (block_y_idx == 6'd31 && first_sprite.CGY == HEIGHT_32) ||
+              (block_y_idx == 6'd63 && first_sprite.CGY == HEIGHT_64)) begin
+            block_y_idx <= 6'd0;
+          end
+
+          else begin
+            block_y_idx <= block_y_idx + 6'd1;
+          end
+
+        end
+
+        // If we're 32 wide and we're at the end of a line, loop around
+        else if (block_x_idx == 3'd7 && first_sprite.CGX == WIDTH_32) begin
+          block_x_idx <= 3'd0;
+          if ((block_y_idx == 6'd15 && first_sprite.CGY == HEIGHT_16) ||
+              (block_y_idx == 6'd31 && first_sprite.CGY == HEIGHT_32) ||
+              (block_y_idx == 6'd63 && first_sprite.CGY == HEIGHT_64)) begin
+            block_y_idx <= 6'd0;
+          end
+          else begin
+            block_y_idx <= block_y_idx + 6'd1;
+          end
+        end
+
+        // If we're not at the end of a line, only increase the fetch_count
+        else begin
+          block_x_idx <= block_x_idx + 3'd1;
+        end
+
+
+      end
+    end
+  end
+  */
+
+
+
+
+
+
+
 
 
   logic EOL; //signal for end of line
@@ -278,6 +376,7 @@ module vdc_HuC6270(input logic clock, reset_N,
     if(~reset_N) begin
       V_cnt   <= VDS + 1;
       V_state <= V_WAIT;
+      first_frame_done <= 0;
     end
 
     else begin
@@ -289,6 +388,7 @@ module vdc_HuC6270(input logic clock, reset_N,
         if(frame_reset) begin
           V_cnt <= VDS + 1;
           V_state <= V_WAIT;
+          first_frame_done <= 1;
         end
 
         // Decrement V_cnt at the end of a line
@@ -385,6 +485,10 @@ module vdc_HuC6270(input logic clock, reset_N,
  
 
 
+  logic [15:0] x_idx, y_idx;
+  assign x_idx = ((HDW - H_cnt) << 3) + char_cycle;
+  assign y_idx = VDW - V_cnt;
+
   // Logic to VCE telling it if we're currently in active display 
   logic        in_vdw; 
   assign in_vdw = (H_state == H_DISP && V_state == H_DISP);
@@ -393,18 +497,58 @@ module vdc_HuC6270(input logic clock, reset_N,
   logic [2:0]  cycle_adjusted;
   assign cycle_adjusted = char_cycle + x_px_offset;
   
+  logic [15:0] top, bot, left, right;
+  assign top = first_sprite.y_pos - 64;
+  assign bot = first_sprite.y_pos - 64 + 15'd32;
+  assign left = first_sprite.x_pos - 8*(HSW + HDS);
+  assign right = first_sprite.x_pos - 8*(HSW +HDS) + 15'd32;
+
+  logic [4:0] sprite_idx_x;
+  logic [5:0] sprite_idx_y;
+  assign sprite_idx_x = x_idx - left;
+  assign sprite_idx_y = y_idx - top;
+
+  logic [15:0] cur_word_idx;
+  logic [3:0] cur_pix;
+
+  always_comb begin
+    if (first_sprite.CGX == WIDTH_32) begin
+      cur_word_idx = ((sprite_idx_y >> 4) << 7) + (sprite_idx_y % 16) + ((sprite_idx_x / 16) << 6);
+    end else begin
+      cur_word_idx = 0;
+    end
+  end
+
+  assign cur_pix = {sprite_data[cur_word_idx     ][15 - (sprite_idx_x % 16)],
+                    sprite_data[cur_word_idx + 16][15 - (sprite_idx_x % 16)],
+                    sprite_data[cur_word_idx + 32][15 - (sprite_idx_x % 16)],
+                    sprite_data[cur_word_idx + 48][15 - (sprite_idx_x % 16)]};
+
   always_comb begin
     VD = 0;
     if(in_vdw) begin //TODO: make this work correctly with new VSYNC
-      VD[8]    = 0; //BG selected
-      VD[7:4]  = output_tile.palette_num;
-      VD[3:0]  = {output_tile.CG1[15 - cycle_adjusted],
+//      if ((left <= x_idx && x_idx < right && top <= y_idx && y_idx < bot) &&
+      if ((left <= x_idx && x_idx < right && top <= y_idx && y_idx < bot) &&
+          first_frame_done) begin
+        VD[8] = 1;
+        VD[7:4] = first_sprite.color;
+        VD[3:0] = cur_pix;
+      end else begin
+      	VD[8]    = 0; //BG selected
+      	VD[7:4]  = output_tile.palette_num;
+      	VD[3:0]  = {output_tile.CG1[15 - cycle_adjusted],
                   output_tile.CG1[7 - cycle_adjusted], 
                   output_tile.CG0[15 - cycle_adjusted],
                   output_tile.CG0[7 - cycle_adjusted]};
+      end
     end
   end
-  
+ 
+
+
+
+
+ 
   logic [15:0] tile_ptr;
   logic [2:0]  fetch_row;
   bat_entry_t curbat;
@@ -419,6 +563,7 @@ module vdc_HuC6270(input logic clock, reset_N,
         tile_pipe[i].CG0         <= 0;
         tile_pipe[i].CG1         <= 0;
       end
+      sprite_word_count <= 0;
     end
     else begin
       if(do_BGfetch) begin
@@ -431,6 +576,24 @@ module vdc_HuC6270(input logic clock, reset_N,
           0: tile_pipe[bg_wr_ptr].CG1 <= MD_in;
         endcase
       end
+
+      else if (do_SATfetch) begin
+        case(char_cycle)
+          2: first_sprite[63:48] <= MD_in;
+          4: first_sprite[47:32] <= MD_in;
+          6: first_sprite[31:16] <= MD_in;
+          0: first_sprite[15:0]  <= MD_in;
+        endcase
+      end
+
+
+      else if (do_Spritefetch) begin
+        if (!(char_cycle & 3'd1)) begin
+          sprite_data[sprite_word_count] <= MD_in; 
+          sprite_word_count <= sprite_word_count + 1;
+        end
+      end
+
     end
   end
   
@@ -446,6 +609,22 @@ module vdc_HuC6270(input logic clock, reset_N,
         default: MA = 0; //TODO: this should be specified by CPU
       endcase
     end
+
+    else if (do_SATfetch) begin
+      case(char_cycle)
+        1: MA = SATB.data;
+        3: MA = SATB.data + 1;
+        5: MA = SATB.data + 2;
+        7: MA = SATB.data + 3;
+        default: MA = 0;
+      endcase
+    end
+
+    else if (do_Spritefetch) begin
+      if (char_cycle & 1) MA = (first_sprite.addr << 5) + sprite_word_count;
+      else MA = 0;
+    end
+
     else MA = 0;
   end
 
