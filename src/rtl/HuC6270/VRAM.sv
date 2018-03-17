@@ -21,13 +21,15 @@ module VRAM (input clock, reset_N,
 `ifdef DUMMY_VRAM
   logic [15:0] VRAM_ARR[2**15-1:0]; //32K 16-bit words
   
-  initial begin
-    $readmemh("GFX.hex", VRAM_ARR);
-  end
-  
   always_ff @(posedge clock, negedge reset_N) begin
-    if(~reset_N) MD_out <= 0;
-    else if(re) MD_out <= VRAM_ARR[MA];
+    if(~reset_N) begin
+      MD_out <= 0;
+      $readmemh("GFX.hex", VRAM_ARR);
+    end
+    else if(re)
+      MD_out <= VRAM_ARR[MA];
+    else if(we)
+      VRAM_ARR[MA] <= MD_in;
   end
   
 `else

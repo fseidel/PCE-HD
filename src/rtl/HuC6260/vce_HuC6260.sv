@@ -23,10 +23,10 @@ module vce_HuC6260( input logic clock, reset_N,
                     input logic [2:0]  A,
                     inout wire [7:0]   D, // Data bus, there's an 9th bit but 
                                          // supposedly it's unused
-                    // Output to VGA
+                    // Output to VGA subsystem
 
 
-                    // output logic RGB_l,               // We won't be needing RGB_l/h
+                    // output logic RGB_l
                     output logic [2:0] VIDEO_G,
                     output logic [2:0] VIDEO_R,
                     output logic [2:0] VIDEO_B,
@@ -73,7 +73,7 @@ module vce_HuC6260( input logic clock, reset_N,
 
   logic [7:0] data_rd;
 
-  assign D  = (~RD_n) ? data_rd : 8'bz;
+  assign D  = (~RD_n & ~CS_n) ? data_rd : 8'bz;
   assign data_rd  = (A == 4) ? CBUF[7:0] :
                     (A == 5) ? CBUF[8]   : 8'hFF;
 
@@ -98,8 +98,8 @@ module vce_HuC6260( input logic clock, reset_N,
       prev_WR_n <= 1;
     end
     else if(clk7_en) begin //runs at MMIO clock
-      prev_RD_n <= RD_n;
-      prev_WR_n <= WR_n;
+      prev_RD_n <= RD_n | CS_n;
+      prev_WR_n <= WR_n | CS_n;
     end
   end
 

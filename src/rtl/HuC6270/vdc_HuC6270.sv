@@ -8,8 +8,8 @@
  */
 
 
-module vdc_HuC6270(input logic clock, reset_N, clock_en,     
-                   input logic [7:0]  DI,// Data in, only lower 8 bits used
+module vdc_HuC6270(input logic clock, reset_N, clock_en, //MMIO_clock_en,     
+                   inout wire [7:0]   D, // Data in, only lower 8 bits used
                    input logic        MRD_n, // "Memory Read Data" from CPU 
                                       // from VRAM
                                       MWR_n, // Memory write from CPU to VRAM 
@@ -24,7 +24,9 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en,
                    output logic       BUSY_n, IRQ_n
                   );	
 
-
+  logic MMIO_clock_en;
+  clock_divider MMIO_clock(.clk(clock), .reset(~reset_N), 
+                          .clk_en(MMIO_clock_en));
 /*
   ControlUnit cu(.clock(clock),
                  .reset_N(reset_N),
@@ -46,21 +48,24 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en,
   logic [15:0] MD_in, MD_out, MD_in_buf, latched_read;
   logic vram_re, vram_we;
 
-  //hack to force signals for testing
-  assign vram_re  = 1;
-  assign vram_we  = 0;
+  assign vram_re  = ~vram_we;
 
 
   logic   read_delay; //selects whether or not we go for a real read on next 
                      //clock
+
+  always_ff @(posedge clock) begin
+    if(~clock_en)
+      latched_read <= MD_in_buf;
+  end
+
+  
   //TODO: standardize resets
-  always @(posedge clock) begin
+  always_ff @(posedge clock) begin
     if(~reset_N) begin
-      latched_read <= 0;
       read_delay   <= 0;
     end
     else if(clock_en) begin
-      latched_read <= MD_in_buf;
       read_delay   <= 0;
     end
     else
@@ -141,8 +146,135 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en,
   assign VDS  = VSR[15:8];
   assign VDW  = VDR[8:0];
   //VCR is passed through
+
+
+
+  logic [15:0] MAWR, MARR;
+  /*
+   * MMIO
+   * There are a LOT of registers
+   * TODO: no DMA controls yet (including SATB!)
+   */
+  reg_sel_t VDC_regnum;
   
-  logic       do_BGfetch;            
+  logic        do_BGfetch;   
+
+  //read/write edge detection
+  logic read, write, prev_RD_n, prev_WR_n;
+  always_ff @(posedge clock, negedge reset_N) begin
+    if(~reset_N) begin
+      prev_RD_n <= 1;
+      prev_WR_n <= 1;
+    end
+    else if(MMIO_clock_en) begin //runs at MMIO clock
+      prev_RD_n <= RD_n | CS_n | ~BUSY_n;
+      prev_WR_n <= WR_n | CS_n | ~BUSY_n;
+    end
+  end
+
+  assign read   = (~RD_n & prev_RD_n & ~CS_n & BUSY_n);
+  assign write  = (~WR_n & prev_WR_n & ~CS_n & BUSY_n);
+
+
+  logic [15:0] CPU_maddr; //goes to address generator
+  assign CPU_maddr = (vram_we) ? MAWR : MARR;
+
+  
+  logic vram_write_pending;
+  always_ff @(posedge clock, negedge reset_N) begin
+    if(~reset_N) begin
+      VDC_regnum <= 0; //makes BUSY_n behave on reset
+      vram_write_pending <= 0;
+    end
+    else begin
+      //This next part must finish before another write is issued or bad
+      //things will happen! Should be okay with our timings.
+      //This goes first so that a new write will set vram_write_pending
+      if(vram_we & vram_write_pending) begin //ignore DMA
+        vram_write_pending <= 0; //clear the write pending bit ASAP
+        MAWR <= MAWR + 1; //and increment the write address
+      end
+      if(MMIO_clock_en) begin
+        if(write)
+          case(A)
+            A_STATUS_ADDR_REG:
+              VDC_regnum <= D[4:0];
+            A_DATA_LSB:
+              case(VDC_regnum)
+                REG_MAWR:
+                  MAWR[7:0] <= D;
+                REG_MARR:
+                  MARR[7:0] <= D;
+                REG_VRR_VWR:
+                  MD_out[7:0] <= D;
+                /*
+                 REG_CR:
+                 CR[7:0] <= D;
+                 REG_RCR:
+                 RCR[7:0] <= D;
+                 REG_BXR:
+                 BXR[7:0] <= D;
+                 REG_BYR:
+                 BYR[7:0] <= D;
+                 REG_MRW:
+                 MWR[7:0] <= D;
+                 REG_HSR:
+                 HSR[7:0] <= D;
+                 REG_HDR:
+                 HDR[7:0] <= D;
+                 REG_VPR:
+                 VPR[7:0] <= D;
+                 REG_VDW:
+                 VDW[7:0] <= D;
+                 REG_VCR:
+                 VCR[7:0] <= D;
+                 REG_DCR:
+                 DCR[7:0] <= D;
+                 */
+              endcase
+            A_DATA_MSB:
+              case(VDC_regnum)
+                REG_MAWR:
+                  MAWR[15:8] <= D;
+                REG_MARR:
+                  MARR[15:8] <= D;
+                REG_VRR_VWR: begin
+                  MD_out[15:8] <= D;
+                  vram_write_pending <= 1;
+                end
+              endcase
+          endcase
+      end
+    end
+  end
+
+
+  //hang CPU if it tries to touch VRAM outside of when it's allowed to
+  assign BUSY_n = ~((~WR_n | ~RD_n) & ~CS_n & (VDC_regnum == REG_VRR_VWR) 
+                    & A[1] & ~do_BGfetch);
+
+  /*
+  always_ff @(posedge clock, negedge reset_N) begin
+    if(~reset_N)
+      BUSY_n <= 1;
+    else if(write & )
+  end
+   */
+  
+  //CPU VRAM access
+  //CPU gets to touch VRAM on even cycles during BGfetch
+  always_comb begin
+    vram_we = 0;
+    if(do_BGfetch & ~char_cycle[0]) begin
+      if(vram_write_pending)
+        vram_we = 1;
+    end
+  end
+  
+
+  /*
+   * Horizontal Syncronization
+   */         
   assign do_BGfetch = ((H_state == H_DISP) || 
                       (H_state == H_WAIT && H_cnt < 2)) && 
                       (V_state == V_DISP);
@@ -318,6 +450,7 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en,
           2: begin
             tile_pipe[bg_wr_ptr].palette_num <= curbat.palette_num;
             tile_ptr <= (curbat.tile_index << 4) + fetch_row;
+            //$strobe("tile_ptr: %x", tile_ptr);
           end
           6: tile_pipe[bg_wr_ptr].CG0 <= MD_in;
           0: tile_pipe[bg_wr_ptr].CG1 <= MD_in;
@@ -332,10 +465,14 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en,
     //assume we have dot width 00
     if(do_BGfetch) begin
       case(char_cycle)
-        1: MA = bat_ptr;         //fetch BAT
-        5: MA = tile_ptr;        //fetch CG0
-        7: MA = tile_ptr + 12'h8;//fetch CG1 (check the offset here)
-        default: MA = 0; //TODO: this should be specified by CPU
+        0: MA        = CPU_maddr;
+        1: MA        = bat_ptr;         //fetch BAT
+        2: MA        = CPU_maddr;
+        4: MA        = CPU_maddr;
+        5: MA        = tile_ptr;        //fetch CG0
+        6: MA        = CPU_maddr;
+        7: MA        = tile_ptr + 12'h8;//fetch CG1 (check the offset here)
+        default: MA  = 0; //TODO: this should be specified by CPU
       endcase
     end
     else MA = 0;
