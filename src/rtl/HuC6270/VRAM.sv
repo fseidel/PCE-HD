@@ -24,7 +24,7 @@ module VRAM (input clock, reset_N,
   always_ff @(posedge clock, negedge reset_N) begin
     if(~reset_N) begin
       MD_out <= 0;
-      $readmemh("GFX.hex", VRAM_ARR);
+      //$readmemh("GFX.hex", VRAM_ARR);
     end
     else if(re)
       MD_out <= VRAM_ARR[MA];

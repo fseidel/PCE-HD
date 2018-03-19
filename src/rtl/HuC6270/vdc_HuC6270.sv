@@ -150,11 +150,18 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en, //MMIO_clock_en,
 
 
   logic [15:0] MAWR, MARR;
+  logic [9:0]  RCR;
+  logic [12:0]  CR;
   /*
    * MMIO
    * There are a LOT of registers
    * TODO: no DMA controls yet (including SATB!)
    */
+  logic [7:0]  D_out;
+  assign D = (~RD_n & ~CS_n) ? D_out : 8'bz;
+
+  logic [7:0]  status;
+  
   reg_sel_t VDC_regnum;
   
   logic        do_BGfetch;   
@@ -163,14 +170,25 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en, //MMIO_clock_en,
   logic read, write, prev_RD_n, prev_WR_n;
   always_ff @(posedge clock, negedge reset_N) begin
     if(~reset_N) begin
-      prev_RD_n <= 1;
+      //prev_RD_n <= 1;
       prev_WR_n <= 1;
     end
     else if(MMIO_clock_en) begin //runs at MMIO clock
-      prev_RD_n <= RD_n | CS_n | ~BUSY_n;
+      //prev_RD_n <= RD_n | CS_n | ~BUSY_n;
       prev_WR_n <= WR_n | CS_n | ~BUSY_n;
     end
   end
+
+
+  always_ff @(posedge clock, negedge reset_N) begin
+    if(~reset_N) begin
+      prev_RD_n <= 1;
+    end
+    else if(clock_en) begin //TODO: wut
+      prev_RD_n <= RD_n | CS_n | ~BUSY_n;
+    end
+  end
+  
 
   assign read   = (~RD_n & prev_RD_n & ~CS_n & BUSY_n);
   assign write  = (~WR_n & prev_WR_n & ~CS_n & BUSY_n);
@@ -183,8 +201,10 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en, //MMIO_clock_en,
   logic vram_write_pending;
   always_ff @(posedge clock, negedge reset_N) begin
     if(~reset_N) begin
-      VDC_regnum <= 0; //makes BUSY_n behave on reset
+      VDC_regnum         <= 0; //makes BUSY_n behave on reset
       vram_write_pending <= 0;
+      RCR                <= 0;
+      CR                 <= 0;
     end
     else begin
       //This next part must finish before another write is issued or bad
@@ -207,11 +227,11 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en, //MMIO_clock_en,
                   MARR[7:0] <= D;
                 REG_VRR_VWR:
                   MD_out[7:0] <= D;
-                /*
-                 REG_CR:
-                 CR[7:0] <= D;
-                 REG_RCR:
-                 RCR[7:0] <= D;
+                REG_CR:
+                  CR[7:0] <= D;
+                REG_RCR:
+                  RCR[7:0] <= D;
+                 /*
                  REG_BXR:
                  BXR[7:0] <= D;
                  REG_BYR:
@@ -242,13 +262,38 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en, //MMIO_clock_en,
                   MD_out[15:8] <= D;
                   vram_write_pending <= 1;
                 end
+                REG_CR:
+                  CR[12:8] <= D[4:0];
+                REG_RCR:
+                  RCR[9:8] <= D[1:0];
               endcase
           endcase
       end
     end
   end
 
+  //read logic
+  //TODO: basically everything
+  logic ACK;
+  always_comb begin
+    ACK = 0;
+    if(~RD_n & ~CS_n & (A == 0)) begin
+      ACK = 1;
+    end
+  end
 
+  always_ff @(posedge clock, negedge reset_N) begin
+    if(~reset_N)
+      D_out <= 0;
+    else if(MMIO_clock_en) begin //TODO: figure out how clock_en works here
+      if(read & (A == 0))
+        D_out <= status;
+    end
+  end
+
+
+
+  
   //hang CPU if it tries to touch VRAM outside of when it's allowed to
   assign BUSY_n = ~((~WR_n | ~RD_n) & ~CS_n & (VDC_regnum == REG_VRR_VWR) 
                     & A[1] & ~do_BGfetch);
@@ -270,8 +315,8 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en, //MMIO_clock_en,
         vram_we = 1;
     end
   end
-  
 
+  
   /*
    * Horizontal Syncronization
    */         
@@ -399,8 +444,7 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en, //MMIO_clock_en,
             NUM_BOT_BLANK_LINES) V_bot_blank  = 1;
     else V_sync = 1;
   end
-  
-  
+    
   localparam BG_PIPE_LEN = 3; //we always write 2 ahead of our read
 
   tile_line_t [BG_PIPE_LEN-1:0] tile_pipe; //need extra slot for current fetch
@@ -413,6 +457,49 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en, //MMIO_clock_en,
   logic        in_vdw; //are we currently in active display?
   assign in_vdw = (H_state == H_DISP && V_state == H_DISP);
 
+  /*
+   * Interrupts
+   */
+  v_state_t prev_V_state;
+  always_ff @(posedge clock, negedge reset_N) begin
+    if(~reset_N) begin
+      IRQ_n        <= 1;
+      prev_V_state <= V_SYNC;
+      status       <= 0; 
+    end
+    else begin
+      if(clock_en) begin
+        prev_V_state <= V_state;
+        //clear pending
+        if(CR[0]); //TODO: implement sprite 0 interrupts
+        if(CR[1]); //TODO: implement sprite overflow interrupts
+        //Vblank interrupt
+        if(V_state != V_DISP && prev_V_state == V_DISP)
+          if(CR[3]) begin
+            IRQ_n     <= 0;
+            status[5] <= 1;
+            end
+        if(EOL) begin //end of line means it's time to process raster interrupts
+          //RCR interrupts
+          if((V_state == V_WAIT && V_cnt == 0) || (V_state == V_DISP)) begin
+            if((cur_row+1 == RCR-64) & (RCR >= 64) & CR[2]) begin
+              IRQ_n     <= 0; //TODO: investigate clock_en interrupt timing
+              status[2] <= 1;
+            end
+          end
+        end
+      end
+      if(MMIO_clock_en & ACK) begin //interrupt acknowledge overrides all
+          IRQ_n  <= 1;
+          status <= 0;
+      end
+    end
+  end
+
+
+
+
+  
 
   logic [2:0]  cycle_adjusted;
   assign cycle_adjusted = char_cycle + x_px_offset;
@@ -457,8 +544,7 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en, //MMIO_clock_en,
         endcase
       end
     end
-  end
-  
+  end  
   logic [15:0] bat_ptr;
   //VRAM address control
   always_comb begin
@@ -472,7 +558,6 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en, //MMIO_clock_en,
         5: MA        = tile_ptr;        //fetch CG0
         6: MA        = CPU_maddr;
         7: MA        = tile_ptr + 12'h8;//fetch CG1 (check the offset here)
-        default: MA  = 0; //TODO: this should be specified by CPU
       endcase
     end
     else MA = 0;

@@ -47,13 +47,15 @@ module vce_HuC6260( input logic clock, reset_N,
   logic [7:0]   CTW; //color table write, INTENTIONALLY 8-bits wide
   logic [8:0]   CTR; //color table read
 
+`ifdef SIMULATION
+  logic [8:0]   CRAM[511:0];
+`else
+  logic [511:0][8:0] CRAM;
+`endif
   
   // ALL of our color data
 `ifdef FAKE_CRAM
   logic [15:0]  FAKE_CRAM[511:0];
-  logic [8:0]   CRAM[511:0];
-`else
-  logic [511:0][8:0]      CRAM;
 `endif
 
   logic clk5_en, clk7_en, clk10_en;
@@ -109,6 +111,7 @@ module vce_HuC6260( input logic clock, reset_N,
   //MMIO
   always_ff @(posedge clock, negedge reset_N) begin
     if(~reset_N) begin
+      CR  <= 2'b00;
       CTA <= 9'h000;
       CTW <= 16'h0000;
 `ifdef FAKE_CRAM   //load CRAM image
