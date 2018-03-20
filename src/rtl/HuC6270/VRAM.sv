@@ -16,7 +16,6 @@ module VRAM (input clock, reset_N,
 
   logic [15:0] data_in, data_out;
   logic [14:0] address;
-  logic wren;
 
 `ifdef DUMMY_VRAM
   logic [15:0] VRAM_ARR[2**15-1:0]; //32K 16-bit words
@@ -28,15 +27,17 @@ module VRAM (input clock, reset_N,
     end
     else if(re)
       MD_out <= VRAM_ARR[MA];
-    else if(we)
+    else if(we) begin
       VRAM_ARR[MA] <= MD_in;
+      $display("vram write %x to %x", MD_in, MA);
+    end
   end
   
 `else
   RAMTest bram(.address(address),
                .clock(clock),
                .data(data_in),
-               .wren(wren),
+               .wren(we),
                .q(data_out)
               );
 `endif

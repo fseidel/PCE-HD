@@ -56,7 +56,7 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en, //MMIO_clock_en,
 
   always_ff @(posedge clock) begin
     if(~clock_en)
-      latched_read <= MD_in_buf;
+      latched_read <= MD_in;
   end
 
   
@@ -205,6 +205,8 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en, //MMIO_clock_en,
       vram_write_pending <= 0;
       RCR                <= 0;
       CR                 <= 0;
+      MAWR               <= 0;
+      MARR               <= 0;
     end
     else begin
       //This next part must finish before another write is issued or bad
@@ -288,6 +290,13 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en, //MMIO_clock_en,
     else if(MMIO_clock_en) begin //TODO: figure out how clock_en works here
       if(read & (A == 0))
         D_out <= status;
+      else if(read & (A == 1))
+        D_out <= 0; //reads back 0, writes ignored
+      else if(read & (A == 2))
+        case(VDC_regnum)
+          default:
+            D_out <= 0; //broken, but let's see what happens
+        endcase
     end
   end
 

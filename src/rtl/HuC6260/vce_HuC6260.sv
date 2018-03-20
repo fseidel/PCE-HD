@@ -154,7 +154,12 @@ module vce_HuC6260( input logic clock, reset_N,
       VIDEO_G <= 0;
     end
     else if(clock_en)
-      if(VD) begin
+      if(^VD === 1'bx) begin //make TVEmu happy during reset
+        VIDEO_B <= 0;
+        VIDEO_R <= 0;
+        VIDEO_G <= 0;
+      end
+      else if(VD) begin
         VIDEO_B <= CDATA[2:0];
         VIDEO_R <= CDATA[5:3];
         VIDEO_G <= CDATA[8:6];
