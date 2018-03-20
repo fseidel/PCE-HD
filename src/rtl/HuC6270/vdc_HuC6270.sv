@@ -101,16 +101,24 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en, //MMIO_clock_en,
   v_state_t V_state; //state in vertical screen
 
   logic [15:0] BXR, BYR; //x and y scroll registers
-  assign BXR = 0; //These can be harcoded to force scroll
-  assign BYR = 0;
+  //assign BXR = 0; //These can be harcoded to force scroll
+  //assign BYR = 0;
+
+  logic [7:0]  MWR;
 
   logic [9:0]  x_start, y_start, cur_row; //BG start values per line
   logic [7:0]  x_mask, y_mask, y_shift;
   
   logic [2:0]  x_px_offset, y_px_offset;
   logic [6:0]  x_tl_offset, y_tl_offset;
+
+
+  logic [1:0]  x_shift;
+  assign y_shift = (MWR[5]) ? 7 :
+                   (MWR[4]) ? 6 : 5;
+
   
-  assign y_shift = 5; //yet another hack
+  //assign y_shift = (MWR[6]) ? 6 : 5; //yet another hack
   assign x_mask = (1 << 9) - 1;
   assign y_mask = (1 << 9) - 1; //ditto
   assign x_px_offset  = x_start[2:0];
@@ -152,6 +160,7 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en, //MMIO_clock_en,
   logic [15:0] MAWR, MARR;
   logic [9:0]  RCR;
   logic [12:0]  CR;
+  
   /*
    * MMIO
    * There are a LOT of registers
@@ -207,6 +216,9 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en, //MMIO_clock_en,
       CR                 <= 0;
       MAWR               <= 0;
       MARR               <= 0;
+      BXR                <= 0;
+      BYR                <= 0;
+      MWR                <= 0;
     end
     else begin
       //This next part must finish before another write is issued or bad
@@ -233,13 +245,13 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en, //MMIO_clock_en,
                   CR[7:0] <= D;
                 REG_RCR:
                   RCR[7:0] <= D;
-                 /*
-                 REG_BXR:
-                 BXR[7:0] <= D;
-                 REG_BYR:
-                 BYR[7:0] <= D;
-                 REG_MRW:
-                 MWR[7:0] <= D;
+                REG_BXR:
+                  BXR[7:0] <= D;
+                REG_BYR:
+                  BYR[7:0] <= D;
+                REG_MWR:
+                  MWR[7:0] <= D;
+                /*
                  REG_HSR:
                  HSR[7:0] <= D;
                  REG_HDR:
@@ -268,6 +280,11 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en, //MMIO_clock_en,
                   CR[12:8] <= D[4:0];
                 REG_RCR:
                   RCR[9:8] <= D[1:0];
+                REG_BXR:
+                  BXR[9:8] <= D[1:0];
+                REG_BYR:
+                  BYR[8]   <= D[0];
+                REG_MWR:; //only 8 bits wide
               endcase
           endcase
       end
@@ -588,7 +605,8 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en, //MMIO_clock_en,
                    ((((cur_row + y_start) >> 3) & y_mask) << y_shift);
       end
       else if(do_BGfetch) begin
-        if(char_cycle == 7) bat_ptr <= bat_ptr + 1;
+        if(char_cycle == 7)
+          bat_ptr <= bat_ptr + 1; //TODO: scrolling still broken
       end
     end
   end
