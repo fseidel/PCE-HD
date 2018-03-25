@@ -8,7 +8,7 @@
  */
 
 
-module vdc_HuC6270(input logic clock, reset_N, clock_en, //MMIO_clock_en,     
+module vdc_HuC6270(input logic clock, reset_N, clock_en,     
                    inout wire [7:0]   D, // Data in, only lower 8 bits used
                    input logic        MRD_n, // "Memory Read Data" from CPU 
                                       // from VRAM
@@ -24,9 +24,6 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en, //MMIO_clock_en,
                    output logic       BUSY_n, IRQ_n
                   );	
 
-  logic MMIO_clock_en;
-  clock_divider MMIO_clock(.clk(clock), .reset(~reset_N), 
-                          .clk_en(MMIO_clock_en));
 /*
   ControlUnit cu(.clock(clock),
                  .reset_N(reset_N),
@@ -52,35 +49,25 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en, //MMIO_clock_en,
   assign vram_re  = ~vram_we;
 
 
+  /*
   logic   read_delay; //selects whether or not we go for a real read on next 
                      //clock
 
   always_ff @(posedge clock) begin
-    if(~clock_en)
-      latched_read <= MD_in;
+    if(clock_en)
+      latched_read <= MD_in_buf;
   end
 
-  
-  //TODO: standardize resets
-  always_ff @(posedge clock) begin
-    if(~reset_N) begin
-      read_delay   <= 0;
-    end
-    else if(clock_en) begin
-      read_delay   <= 0;
-    end
-    else
-      read_delay   <= 1;
-  end
-
-  assign MD_in = (read_delay) ? latched_read : MD_in_buf;
+  assign MD_in  = latched_read;
+  */
   
   VRAM vram(.clock(clock),  //fseidel: This interface needs some work
             .reset_N(reset_N),
             .MA(MA),
             .re(vram_re),
             .we(vram_we),
-            .MD_out(MD_in_buf),
+            //.MD_out(MD_in_buf),
+            .MD_out(MD_in),
             .MD_in(MD_out)
             );
  
@@ -96,8 +83,17 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en, //MMIO_clock_en,
   VSR_t VSR; // $0C
   VDR_t VDR; // $0D
   VCR_t VCR; // $0E
-    
-  logic [4:0] HSW; // Horizontal synchronous pulse width
+
+  //test values from parasol stars
+  assign HSR = 16'h0202; // $0A
+  assign HDR = 16'h031F; // $0B
+  assign VSR = 16'h0F02; // $0C
+  assign VDR = 16'h00EF; // $0D
+  assign VCR = 16'h0003; // $0E
+
+  //despite what archaic pixels says, the patent (and my math) indicate that
+  //HSW needs a "- 1"
+  logic [4:0] HSW; // Horizontal synchronous pulse width - 1
   logic [6:0] HDS; // Horizontal display start position - 1
   logic [6:0] HDW; // Horizontal display width in tiles - 1
   logic [3:0] HDE; // Horizontal display ending period - 1
@@ -108,7 +104,8 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en, //MMIO_clock_en,
   assign HDW  = HDR.HDW;
   assign HDE  = HDR.HDE;
 
-  logic [4:0] VSW; // Vertical synchronous pulse width
+  //ditto for VSW
+  logic [4:0] VSW; // Vertical synchronous pulse width - 1
   logic [7:0] VDS; // Vertical display start position - 2
   logic [8:0] VDW; // Vertical display width in pixels - 1
   logic [7:0] VDE; // Vertical display end position
@@ -152,6 +149,10 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en, //MMIO_clock_en,
   logic [15:0] MAWR, MARR;
   logic [9:0]  RCR;
   logic [12:0]  CR;
+
+  //high when CPU is issuing a read or write request
+  logic VRAM_read_req;
+  logic VRAM_write_req;
   
   /*
    * MMIO
@@ -167,20 +168,23 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en, //MMIO_clock_en,
   
   logic        do_BGfetch;   
 
+  //make I/O signals active high for convention
+  logic        RD, WR, CS;
+  assign {RD, WR} = {(~RD_n & ~CS_n), (~WR_n & ~CS_n)};
   //read/write edge detection
-  logic read, write, prev_RD_n, prev_WR_n;
+  logic prev_RD, prev_WR;
   always_ff @(posedge clock, negedge reset_N) begin
     if(~reset_N) begin
-      //prev_RD_n <= 1;
-      prev_WR_n <= 1;
+      prev_RD <= 0;
+      prev_WR <= 0;
     end
-    else if(MMIO_clock_en) begin //runs at MMIO clock
-      //prev_RD_n <= RD_n | CS_n | ~BUSY_n;
-      prev_WR_n <= WR_n | CS_n | ~BUSY_n;
+    else if(clock_en) begin
+      prev_RD <= RD;
+      prev_WR <= WR;
     end
   end
-
-
+  
+/*
   always_ff @(posedge clock, negedge reset_N) begin
     if(~reset_N) begin
       prev_RD_n <= 1;
@@ -189,17 +193,13 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en, //MMIO_clock_en,
       prev_RD_n <= RD_n | CS_n | ~BUSY_n;
     end
   end
-  
-
-  assign read   = (~RD_n & prev_RD_n & ~CS_n & BUSY_n);
-  assign write  = (~WR_n & prev_WR_n & ~CS_n & BUSY_n);
-
-
-  logic [15:0] CPU_maddr; //goes to address generator
-  assign CPU_maddr = (vram_we) ? MAWR : MARR;
+  */
 
   
   logic vram_write_pending;
+  logic MARR_increment;
+  logic CPU_read_issue, CPU_write_issue;
+  logic [15:0] CPU_write_buf;
   always_ff @(posedge clock, negedge reset_N) begin
     if(~reset_N) begin
       VDC_regnum         <= 0; //makes BUSY_n behave on reset
@@ -213,15 +213,14 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en, //MMIO_clock_en,
       MWR                <= 0;
     end
     else begin
-      //This next part must finish before another write is issued or bad
-      //things will happen! Should be okay with our timings.
-      //This goes first so that a new write will set vram_write_pending
-      if(vram_we & vram_write_pending) begin //ignore DMA
-        vram_write_pending <= 0; //clear the write pending bit ASAP
-        MAWR <= MAWR + 1; //and increment the write address
-      end
-      if(MMIO_clock_en) begin
-        if(write)
+      if(clock_en) begin
+        if(CPU_read_issue) begin
+          MARR <= MARR + 1;
+        end
+        if(CPU_write_issue) begin
+          MAWR <= MAWR + 1;
+        end
+        if(WR & ~prev_WR)
           case(A)
             A_STATUS_ADDR_REG:
               VDC_regnum <= D[4:0];
@@ -232,7 +231,7 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en, //MMIO_clock_en,
                 REG_MARR:
                   MARR[7:0] <= D;
                 REG_VRR_VWR:
-                  MD_out[7:0] <= D;
+                  CPU_write_buf[7:0] <= D;
                 REG_CR:
                   CR[7:0] <= D;
                 REG_RCR:
@@ -264,10 +263,8 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en, //MMIO_clock_en,
                   MAWR[15:8] <= D;
                 REG_MARR:
                   MARR[15:8] <= D;
-                REG_VRR_VWR: begin
-                  MD_out[15:8] <= D;
-                  vram_write_pending <= 1;
-                end
+                REG_VRR_VWR:
+		  CPU_write_buf[15:8] <= D;
                 REG_CR:
                   CR[12:8] <= D[4:0];
                 REG_RCR:
@@ -284,56 +281,173 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en, //MMIO_clock_en,
   end
 
   //read logic
-  //TODO: basically everything
+
+
+  //IRQ acknowledge + read invalidation
+  //TODO:possibly lose an IRQ if it's delivered while ACKing another. Fix this.
+  //Maybe not???
   logic ACK;
   always_comb begin
     ACK = 0;
-    if(~RD_n & ~CS_n & (A == 0)) begin
-      ACK = 1;
-    end
-  end
-
-  always_ff @(posedge clock, negedge reset_N) begin
-    if(~reset_N)
-      D_out <= 0;
-    else if(MMIO_clock_en) begin //TODO: figure out how clock_en works here
-      if(read & (A == 0))
-        D_out <= status;
-      else if(read & (A == 1))
-        D_out <= 0; //reads back 0, writes ignored
-      else if(read & (A == 2))
-        case(VDC_regnum)
-          default:
-            D_out <= 0; //broken, but let's see what happens
-        endcase
-    end
+    if(RD & ~prev_RD & (A == 0))
+      ACK  = 1;
   end
 
 
-
+  enum logic [1:0] {IDLE, READ, WRITE, WAIT}
+       mem_state, mem_nextstate;
   
-  //hang CPU if it tries to touch VRAM outside of when it's allowed to
-  assign BUSY_n = ~((~WR_n | ~RD_n) & ~CS_n & (VDC_regnum == REG_VRR_VWR) 
-                    & A[1] & ~do_BGfetch);
+  assign VRAM_read_req = (A == 3) &
+                         ((RD & (VDC_regnum == REG_VRR_VWR)) | 
+                          (WR & (VDC_regnum == REG_MARR)));
+  
+  
+  assign VRAM_write_req = WR & (A == 3) & (VDC_regnum == REG_VRR_VWR); 
+  
+  //TODO: MARR update can affect BUSY_n
+  //TODO: VBLANK access/BURST mode
+  logic CPU_access_ok;
+  assign CPU_access_ok = (V_state != V_DISP || H_state == H_DISP)
+                         & ~char_cycle[0];  //CPU gets even cycles
 
-  /*
+
+  logic mem_wait;
+
+
+  logic new_read_req, new_write_req, prev_read_req, prev_write_req,
+        cur_read_req, cur_write_req;
+  
+  assign new_read_req  = (VRAM_read_req & ~prev_read_req) | cur_read_req;
+  assign new_write_req  = (VRAM_write_req & ~prev_write_req) | cur_write_req;
+  
   always_ff @(posedge clock, negedge reset_N) begin
-    if(~reset_N)
-      BUSY_n <= 1;
-    else if(write & )
+    if(~reset_N) begin
+      prev_read_req  <= 0;
+      prev_write_req <= 0;
+      cur_read_req   <= 0;
+      cur_write_req  <= 0;
+    end
+    else begin
+      prev_read_req  <= VRAM_read_req;
+      prev_write_req <= VRAM_write_req;
+      if(VRAM_read_req & ~prev_read_req)
+        cur_read_req <= 1;
+      if(VRAM_write_req & ~prev_write_req)
+        cur_write_req <= 1;
+      if(CPU_read_issue)
+        cur_read_req <= 0;
+      if(CPU_write_issue)
+        cur_write_req <= 0;
+    end
   end
+  
+  //state, outputs
+  //assumes a read won't start during an update. This shouldn't happen as long 
+  //as long as busy works correctly.
+
+  /* 
+   * READ occurs when the CPU reads the upper byte of the VRR
+   * UPDATE occurs when the CPU modifies the upper byte of the MARR
+   * An interesting quirk of the VDC is that modifying the lower byte of the
+   * MARR does not trigger a memory fetch. The upper byte, however, will trigger
+   * a memory fetch and MARR increment.
    */
   
-  //CPU VRAM access
-  //CPU gets to touch VRAM on even cycles during BGfetch
   always_comb begin
-    vram_we = 0;
-    if(do_BGfetch & ~char_cycle[0]) begin
-      if(vram_write_pending)
-        vram_we = 1;
-    end
+    mem_nextstate    = IDLE;
+    CPU_read_issue   = 0;
+    CPU_write_issue  = 0;
+    mem_wait         = 0;
+    case(mem_state)
+      IDLE: begin
+	if(new_read_req) begin
+          mem_nextstate  = READ;
+	  mem_wait 	 = 1;
+	end
+    else if(new_write_req) begin
+	  mem_nextstate  = WRITE;
+	  mem_wait 	 = 1;
+	end
+      end
+      READ: begin
+	    mem_nextstate   = (CPU_access_ok) ? IDLE : READ;
+        mem_wait        = ~CPU_access_ok;
+        CPU_read_issue  = CPU_access_ok;
+      end
+      WRITE: begin
+        mem_nextstate    = (CPU_access_ok) ? IDLE : WRITE;
+        mem_wait         = ~CPU_access_ok;
+        CPU_write_issue  = CPU_access_ok;
+      end
+      WAIT:
+         if(VRAM_read_req | VRAM_write_req)
+           mem_nextstate  = WAIT;
+    endcase
   end
 
+  logic [15:0] CPU_maddr; //goes to address generator
+  //assign CPU_maddr = (vram_we) ? MAWR : MARR;
+
+
+
+  assign MD_out = CPU_write_buf; //only matters 1 cycle after clock_en
+
+  assign CPU_maddr = (CPU_write_issue) ? MAWR : MARR;
+  
+  logic [15:0] VRAM_readbuf;
+  //next state logic. Turns out that doing this 240-style is really clean
+  always_ff @(posedge clock, negedge reset_N) begin
+    if(~reset_N) begin
+      mem_state <= IDLE;
+    end
+    else if(clock_en) begin
+      mem_state <= mem_nextstate;
+      if(CPU_read_issue)
+        VRAM_readbuf <= MD_in;
+      
+    end
+  end
+  
+  logic [15:0] VRAM_output; //TODO: is this okay?
+  //assign VRAM_output = (char_cycle[0]) ? MD_in : VRAM_readbuf;
+  assign VRAM_output = VRAM_readbuf;
+
+  //TODO: is this fast enough?
+  always_ff @(posedge clock, negedge reset_N) begin
+    if(~reset_N) begin
+      D_out <= 0;
+    end
+    else if(clock_en & RD & ~prev_RD) begin
+      if(A == 0)
+        D_out <= status;
+      else if(A == 1)
+        D_out <= 0; //reads back 0, writes ignored
+      else if(VDC_regnum == REG_VRR_VWR) begin
+        if(mem_state == IDLE) begin
+          if(~A[0]) //A == 2
+            D_out <= VRAM_readbuf[7:0];
+          else //A == 3
+            D_out <= VRAM_readbuf[15:8];
+        end
+      end
+    end
+  end
+  
+  //hang CPU if it tries to touch VRAM outside of when it's allowed to
+  //TODO: burst mode
+  always_comb begin
+    BUSY_n  = ~mem_wait;
+    /*
+    if(~CS_n & (A == 3) & (((~RD_n | ~WR_n) & (VDC_regnum == REG_VRR_VWR)) | 
+                           (~WR_n & (VDC_regnum == REG_MARR)))) begin
+      if(V_state != V_DISP || H_state != H_DISP)
+        BUSY_n = 0;
+     end
+     */
+  end
+
+
+  assign vram_we = CPU_write_issue;
   
   /*
    * Horizontal Syncronization
@@ -542,17 +656,13 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en, //MMIO_clock_en,
           end
         end
       end
-      if(MMIO_clock_en & ACK) begin //interrupt acknowledge overrides all
+      if(clock_en & ACK) begin //interrupt acknowledge overrides all
           IRQ_n  <= 1;
           status <= 0;
       end
     end
   end
 
-
-
-
-  
 
   logic [2:0]  cycle_adjusted;
   assign cycle_adjusted = char_cycle + x_px_offset;
@@ -587,13 +697,13 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en, //MMIO_clock_en,
     else if(clock_en) begin
       if(do_BGfetch) begin
         case(char_cycle)
-          2: begin
+          1: begin
             tile_pipe[bg_wr_ptr].palette_num <= curbat.palette_num;
             tile_ptr <= (curbat.tile_index << 4) + fetch_row;
             //$strobe("tile_ptr: %x", tile_ptr);
           end
-          6: tile_pipe[bg_wr_ptr].CG0 <= MD_in;
-          0: tile_pipe[bg_wr_ptr].CG1 <= MD_in;
+          5: tile_pipe[bg_wr_ptr].CG0 <= MD_in;
+          7: tile_pipe[bg_wr_ptr].CG1 <= MD_in;
         endcase
       end
     end
@@ -613,7 +723,7 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en, //MMIO_clock_en,
         7: MA        = tile_ptr + 12'h8;//fetch CG1 (check the offset here)
       endcase
     end
-    else MA = 0;
+    else MA = CPU_maddr;
   end
 
   //BAT pointer management
@@ -643,7 +753,7 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en, //MMIO_clock_en,
   always_ff @(posedge clock, negedge reset_N) begin
     if(~reset_N) begin
       char_cycle <= 0;
-      bg_wr_ptr  <= BG_PIPE_LEN-1; //first write of a line is garbage
+      bg_wr_ptr  <= 0;
       bg_rd_ptr  <= 0;
     end
     else if(clock_en) begin
@@ -656,117 +766,12 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en, //MMIO_clock_en,
       end
       else bg_rd_ptr <= 0; //TODO: jump to real start of line
       if(do_BGfetch) begin
-        if(char_cycle == 0) begin
+        if(char_cycle == 7) begin
           if(bg_wr_ptr == (BG_PIPE_LEN-1)) bg_wr_ptr <= 0;
           else bg_wr_ptr <= bg_wr_ptr + 1;
         end
       end
-      else bg_wr_ptr <= BG_PIPE_LEN-1; //first write is garbage
+      else bg_wr_ptr <= 0; //first write is garbage
     end
   end
-
-  
-
-
-/*
-  // This entire FSM is just to test the BRAM. DISREGARD
-  enum logic [3:0] {WAIT, READ, WRITE, END} state, next_state;
-
-  always_comb begin
-
-    wren = 0;
-    data_in = 16'd0;
-
-    unique case (state)
-
-      WAIT: begin
-
-        next_state = WRITE;
-        wren = 1'b1;
-        data_in = 16'hF0F0;
-
-      end
-
-      WRITE: begin
-
-        next_state = READ;
-
-      end
-
-      READ, END: begin
-
-        next_state = END;
-
-      end
-
-    endcase
-
-  end
-
-  always_ff @(posedge clock, negedge reset_N) begin
-    if (~reset_N)
-      state <= WAIT;
-    else
-      state <= next_state;
-
-  end
-*/
-
 endmodule : vdc_HuC6270;
-
-
-
-/*
-module top();
-
-  logic clock, CS_n, WR_n, reset_N, dummy;
-  logic [15:0] D;
-
-  vdc_HuC6270 vdc(.*);
-
-  // This entire TB is just to make sure the BRAM is working
-  // in simulation. Disregard all of this
-
-  initial begin
-    $monitor("state: %s data_out: %x", vdc.state, vdc.data_out);
-    clock = 1'b0;
-    reset_N = 1'b0;
-    reset_N <= 1'b1;
-    forever #5 clock = ~clock;
-  end
-
-  initial begin
-
-    @(posedge clock);
-    @(posedge clock);
-    @(posedge clock);
-    @(posedge clock);
-
-    $finish;
-  end
-
-endmodule: top
-*/
-
-
-
-
-
-// Old VDC inputs, not needed but going to keep here in case it's ever useful
-/*
-                    inout logic [7:0]  D_low,
-                    inout logic [8:15] D_hi,
-                    input logic EW_8_16,     // Data bus width select (8 en, 16 dis), UNUSED
-                    inout logic VSYNC_n,
-                    inout logic HSYNC_n,
-                    output logic DISP, // screen blanking status (blanked dis, displayed en)
-                    inout logic SPBG,  // pixel bus (sprite en, bkgrnd dis) (VD8)
-                    inout logic [7:0] VD,
-                    output logic MWR_n, // VRAM write strobe
-                    output logic MRD_n, // VRAM read strobe
-                    inout logic [15:0] MD, // VRAM Data bus
-                    output logic [15:0] MA, // VRAM Address bus
-                    output logic IRQ_n, // IRQ output to HuC6280
-                    output logic BUSY_n, // BUSY status output
-                    input logic [1:0] A);
-*/
