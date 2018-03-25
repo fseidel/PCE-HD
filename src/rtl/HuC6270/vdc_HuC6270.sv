@@ -994,10 +994,10 @@ module vdc_HuC6270(input logic clock, reset_N,
           VD[8] = 1;
           VD[7:4] = line_sprite_data[disp_cycle_sprite_idx[x_idx/16][3:0]].info.color;
           VD[3:0] = {
-            line_sprite_data[disp_cycle_sprite_idx[x_idx/16][3:0]].data[0][15-(x_idx%16)],
-            line_sprite_data[disp_cycle_sprite_idx[x_idx/16][3:0]].data[1][15-(x_idx%16)],
+            line_sprite_data[disp_cycle_sprite_idx[x_idx/16][3:0]].data[3][15-(x_idx%16)],
             line_sprite_data[disp_cycle_sprite_idx[x_idx/16][3:0]].data[2][15-(x_idx%16)],
-            line_sprite_data[disp_cycle_sprite_idx[x_idx/16][3:0]].data[3][15-(x_idx%16)]
+            line_sprite_data[disp_cycle_sprite_idx[x_idx/16][3:0]].data[1][15-(x_idx%16)],
+            line_sprite_data[disp_cycle_sprite_idx[x_idx/16][3:0]].data[0][15-(x_idx%16)]
           };
 
 
