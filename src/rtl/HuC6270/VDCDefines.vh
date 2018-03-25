@@ -118,6 +118,7 @@ typedef struct packed {
   logic y_invert;
   logic SPBG;
   logic [15:0] base_addr;       // The base address for this 1x16 pixel chunk
+  logic [3:0] color;
 } line_sprite_info_t;
 
 // Representation of the sprite DATA for one line (for a 16x16 chunk)

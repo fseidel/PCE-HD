@@ -219,16 +219,29 @@ module vdc_HuC6270(input logic clock, reset_N,
 
   // Sprite Data Fetch
   logic do_Spritefetch;
+  assign do_Spritefetch = (V_state == V_WAIT && V_cnt == 0 && H_state == H_END) ||
+                          (V_state == V_DISP && V_cnt != 0 && 
+                            (H_state == H_SYNC || (H_state == H_WAIT && H_cnt >= 2) || H_state == H_END)) ||
+                          (V_state == V_DISP && V_cnt == 0 &&
+                            (H_state == H_SYNC || (H_state == H_WAIT && H_cnt >= 2)));
+
+
+  logic do_Linearrange;
+  assign do_Linearrange = (V_state == V_DISP && H_state == H_WAIT && H_cnt < 2);
+/*
   assign do_Spritefetch = ((H_state == H_SYNC) || (H_state == H_WAIT) || (H_state == H_END)) &&
                           (V_state == V_DISP) && 
                           ~do_BGfetch &&
                           first_frame_done;
+
   logic [15:0] sprite_data[num_sprites][512];
   logic [$clog2(num_sprites) - 1 : 0] cur_sprite_fetch;
+*/
 
-  logic [9:0] sprite_word_count;
-  logic [9:0] sprite_num_words;
+//  logic [9:0] sprite_word_count;
 
+//  logic [9:0] sprite_num_words;
+/*
   always_comb begin
 
     sprite_num_words = 10'd0;
@@ -281,7 +294,7 @@ module vdc_HuC6270(input logic clock, reset_N,
     endcase
 
   end
-
+*/
 
 /*
   // Sprite fetching FSM
@@ -575,13 +588,13 @@ module vdc_HuC6270(input logic clock, reset_N,
     if (~second_half) begin
       sprite_base_addr = (cur_entry.addr << 5) +
                          (temp_y % 16) +
-                         ((temp_y) * 128);
+                         ((temp_y / 16) * 128);
     end
 
     else begin
       sprite_base_addr = (cur_entry.addr << 5) +
                          (temp_y % 16) +
-                         ((temp_y) * 128) +
+                         ((temp_y / 16) * 128) +
                          (64); // Add extra 64 to get to second half
     end
 
@@ -606,14 +619,20 @@ module vdc_HuC6270(input logic clock, reset_N,
         // we've already checked all of the sprites
         if (line_sprite_idx < 5'd16 && satb_idx < 7'd64) begin
 
+
           if (second_half) begin
+
+//            if (satb_idx < 2)
+//              $display("second half! %x", sprite_base_addr);
+
             // If we're on the second_half of a sprite, 
             // assume double-wide and copy the data over.
-            line_sprite_info[line_sprite_idx].x_pos <= cur_entry.x_pos[9:0];
+            line_sprite_info[line_sprite_idx].x_pos <= cur_entry.x_pos[9:0] + 10'd16;
             line_sprite_info[line_sprite_idx].x_invert <= cur_entry.x_invert;
             line_sprite_info[line_sprite_idx].y_invert <= cur_entry.y_invert;
             line_sprite_info[line_sprite_idx].SPBG <= cur_entry.SPBG;
             line_sprite_info[line_sprite_idx].base_addr <= sprite_base_addr;
+            line_sprite_info[line_sprite_idx].color <= cur_entry.color;
 
             // Disable second_half
             second_half <= 1'd0;
@@ -629,6 +648,10 @@ module vdc_HuC6270(input logic clock, reset_N,
           // Check if the next line happens to intersect with this sprite
           else if (sprite_vertical_intersect) begin
 
+//            if (satb_idx < 2)
+//              $display("intersect! line_sprite_idx: %d, satb_idx: %d, addr: %x, temp_y: %d", line_sprite_idx, satb_idx, sprite_base_addr, temp_y);
+
+
             // Save the Sprite information
             if (cur_entry.CGX == WIDTH_16) begin
 
@@ -637,6 +660,7 @@ module vdc_HuC6270(input logic clock, reset_N,
               line_sprite_info[line_sprite_idx].y_invert <= cur_entry.y_invert;
               line_sprite_info[line_sprite_idx].SPBG <= cur_entry.SPBG;
               line_sprite_info[line_sprite_idx].base_addr <= sprite_base_addr;          
+              line_sprite_info[line_sprite_idx].color <= cur_entry.color;
 
               // Move onto the next entry
               line_sprite_idx <= line_sprite_idx + 5'd1;
@@ -653,6 +677,7 @@ module vdc_HuC6270(input logic clock, reset_N,
               line_sprite_info[line_sprite_idx].y_invert <= cur_entry.y_invert;
               line_sprite_info[line_sprite_idx].SPBG <= cur_entry.SPBG;
               line_sprite_info[line_sprite_idx].base_addr <= sprite_base_addr;          
+              line_sprite_info[line_sprite_idx].color <= cur_entry.color;
 
               // Do NOT move onto the next sprite, but enable second_half
               second_half <= 1'd1;
@@ -676,6 +701,57 @@ module vdc_HuC6270(input logic clock, reset_N,
 
 
     end // else 
+
+  end
+
+
+  /////////////////////////////////////////////////////
+  // LINE ARRANGE FSM
+
+  logic [3:0] sprite_arrange_idx;
+  logic [4:0] disp_cycle_sprite_idx[16];
+
+  always_ff @(posedge clock, negedge reset_N) begin
+
+    if (~reset_N || 
+        (H_state == H_WAIT && H_cnt == 2)) begin
+      sprite_arrange_idx <= 0;
+      disp_cycle_sprite_idx[0] <= 5'd0;
+      disp_cycle_sprite_idx[1] <= 5'd0;
+      disp_cycle_sprite_idx[2] <= 5'd0;
+      disp_cycle_sprite_idx[3] <= 5'd0;
+      disp_cycle_sprite_idx[4] <= 5'd0;
+      disp_cycle_sprite_idx[5] <= 5'd0;
+      disp_cycle_sprite_idx[6] <= 5'd0;
+      disp_cycle_sprite_idx[7] <= 5'd0;
+      disp_cycle_sprite_idx[8] <= 5'd0;
+      disp_cycle_sprite_idx[9] <= 5'd0;
+      disp_cycle_sprite_idx[10] <= 5'd0;
+      disp_cycle_sprite_idx[11] <= 5'd0;
+      disp_cycle_sprite_idx[12] <= 5'd0;
+      disp_cycle_sprite_idx[13] <= 5'd0;
+      disp_cycle_sprite_idx[14] <= 5'd0;
+      disp_cycle_sprite_idx[15] <= 5'd0;
+    end
+
+    else begin
+
+      if (do_Linearrange) begin
+
+        // If the sprite idx we're on is within the bounds of the
+        // number of sprites on the lines
+        if (sprite_arrange_idx < line_sprite_idx) begin
+
+          disp_cycle_sprite_idx[(line_sprite_data[sprite_arrange_idx].info.x_pos-32)/16][4] <= 1'b1;
+          disp_cycle_sprite_idx[(line_sprite_data[sprite_arrange_idx].info.x_pos-32)/16][3:0] <= sprite_arrange_idx;
+
+        end
+
+        sprite_arrange_idx <= sprite_arrange_idx + 4'd1;
+
+      end
+
+    end
 
   end
 
@@ -810,60 +886,62 @@ module vdc_HuC6270(input logic clock, reset_N,
   assign cycle_adjusted = char_cycle + x_px_offset;
 
 
-/*  
-  logic [15:0] top[num_sprites];
-  logic [15:0] bot[num_sprites];
-  logic [15:0] left[num_sprites];
-  logic [15:0] right[num_sprites];
-  logic [15:0] sprite_idx_x[num_sprites];
-  logic [15:0] sprite_idx_y[num_sprites];
-//  assign sprite_idx_x = x_idx - left[1];
-//  assign sprite_idx_y = y_idx - top[1];
 
-  logic [14:0] width[num_sprites];
-  logic [14:0] height[num_sprites];
+  ///////////////////////////////////////////////////////////////////////////
+  // SPRITE FETCH FSM
+  ///////////////////////////////////////////////////////////////////////////
 
-  genvar i;
-  generate 
-    for (i = 0; i < num_sprites; i++) begin : ra
-      assign width[i] = (satb_entries[i].CGX == WIDTH_16) ? 15'd16 : 15'd32;
-      always_comb begin
-        if (satb_entries[i].CGY == HEIGHT_16) height[i] = 15'd16;
-        else if (satb_entries[i].CGY == HEIGHT_32) height[i] = 15'd32;
-        else height[i] = 15'd64;
-      end
+  // Which sprite we're fetching
+  logic [3:0] cur_sprite_fetch, prev_sprite_fetch;
 
-      assign top[i] = satb_entries[i].y_pos - 64;
-      assign bot[i] = satb_entries[i].y_pos - 64 + height[i];
-      assign left[i] = satb_entries[i].x_pos - 8*(HSW + HDS);
-      assign right[i] = satb_entries[i].x_pos - 8*(HSW +HDS) + width[i];
+  // Which word we're fetching for the current sprite
+  logic [1:0] sprite_word_idx, prev_sprite_word_idx;
 
-      assign sprite_idx_x[i] = x_idx - left[i];
-      assign sprite_idx_y[i] = y_idx - top[i];
-    end : ra
-  endgenerate
+  logic first_Spritefetch_cycle;
 
-  logic [15:0] cur_word_idx[num_sprites];
-  logic [3:0] cur_pix[num_sprites];
+  line_sprite_data_t line_sprite_data[16];
 
-  genvar j;
-  generate
-    for (j = 0; j < num_sprites; j++) begin : ja
-      always_comb begin
-        if (satb_entries[j].CGX == WIDTH_32) begin
-          cur_word_idx[j] = ((sprite_idx_y[j] >> 4) << 7) + (sprite_idx_y[j] % 16) + ((sprite_idx_x[j] / 16) << 6);
-        end else begin
-          cur_word_idx[j] = (sprite_idx_y[j]) + ((sprite_idx_x[j]));
-        end
-      end
+  always_ff @(posedge clock, negedge reset_N) begin
 
-      assign cur_pix[j] = {sprite_data[j][cur_word_idx[j]     ][15 - (sprite_idx_x[j] % 16)],
-                        sprite_data[j][cur_word_idx[j] + 16][15 - (sprite_idx_x[j] % 16)],
-                        sprite_data[j][cur_word_idx[j] + 32][15 - (sprite_idx_x[j] % 16)],
-                        sprite_data[j][cur_word_idx[j] + 48][15 - (sprite_idx_x[j] % 16)]};
-      
-    end : ja
-  endgenerate
+    if (~reset_N ||
+        (H_state == H_DISP && H_cnt == 0)) begin
+      cur_sprite_fetch <= 4'd0;
+      sprite_word_idx <= 2'd0;
+      prev_sprite_fetch <= 4'd0;
+      prev_sprite_word_idx <= 2'd0;
+      first_Spritefetch_cycle <= 1'd1;
+    end
+
+    else begin
+      first_Spritefetch_cycle <= 1'd0;
+
+      prev_sprite_fetch <= cur_sprite_fetch;
+      prev_sprite_word_idx <= sprite_word_idx;
+
+      if (do_Spritefetch) begin
+//        $display("%d %d, base_addr:%x, MA:%x y_idx:%d", cur_sprite_fetch, sprite_word_idx, line_sprite_info[cur_sprite_fetch].base_addr, MA, y_idx);
+        // Copy over the info
+        if (sprite_word_idx == 2'd0) begin
+          line_sprite_data[cur_sprite_fetch].info <= line_sprite_info[cur_sprite_fetch];
+        end // if (sprite_word_idx == 2'd0)
+
+
+        if (sprite_word_idx == 2'd3) begin
+          cur_sprite_fetch <= cur_sprite_fetch + 4'd1;
+          sprite_word_idx <= 2'd0;
+        end // if (sprite_word_idx == 2'd3)
+
+        else begin
+          sprite_word_idx <= sprite_word_idx + 2'd1;
+        end // else
+        
+        
+      end // if (do_Spritefetch)
+
+    end // else
+
+  end // always_ff
+
 
   logic [3:0] tile_pix;
   assign tile_pix = {output_tile.CG1[15 - cycle_adjusted],
@@ -875,6 +953,8 @@ module vdc_HuC6270(input logic clock, reset_N,
   always_comb begin
     VD = 0;
     if(in_vdw) begin //TODO: make this work correctly with new VSYNC
+
+/*
 //      if ((left <= x_idx && x_idx < right && top <= y_idx && y_idx < bot) &&
       if ((left[1] <= x_idx && x_idx < right[1] && top[1] <= y_idx && y_idx < bot[1]) &&
           first_frame_done) begin
@@ -902,18 +982,60 @@ module vdc_HuC6270(input logic clock, reset_N,
         VD[3:0] = cur_pix[0]; 
         end
       end else begin
+*/
       	VD[8]    = 0; //BG selected
       	VD[7:4]  = output_tile.palette_num;
       	VD[3:0]  = tile_pix;
-        if (tile_pix == 0) begin
+        if (tile_pix == 0)
           VD[7:4] = 0;
+
+        if (disp_cycle_sprite_idx[x_idx / 16][4]) begin
+
+          VD[8] = 1;
+          VD[7:4] = line_sprite_data[disp_cycle_sprite_idx[x_idx/16][3:0]].info.color;
+          VD[3:0] = {
+            line_sprite_data[disp_cycle_sprite_idx[x_idx/16][3:0]].data[0][15-(x_idx%16)],
+            line_sprite_data[disp_cycle_sprite_idx[x_idx/16][3:0]].data[1][15-(x_idx%16)],
+            line_sprite_data[disp_cycle_sprite_idx[x_idx/16][3:0]].data[2][15-(x_idx%16)],
+            line_sprite_data[disp_cycle_sprite_idx[x_idx/16][3:0]].data[3][15-(x_idx%16)]
+          };
+
+
+        end    
+/*
+        if (line_sprite_data[0].info.x_pos - 32 <= x_idx && x_idx < line_sprite_data[0].info.x_pos - 32 + 16 && line_sprite_idx != 0) begin
+          VD[8] = 1;
+          VD[7:4] = line_sprite_data[0].info.color;
+          VD[3:0] = {
+            line_sprite_data[0].data[0][15-(x_idx%16)],
+            line_sprite_data[0].data[1][15-(x_idx%16)],
+            line_sprite_data[0].data[2][15-(x_idx%16)],
+            line_sprite_data[0].data[3][15-(x_idx%16)]
+          };
         end
-      end
+        if (line_sprite_data[1].info.x_pos - 32 <= x_idx && x_idx < line_sprite_data[1].info.x_pos - 32 + 16 && line_sprite_idx > 0) begin
+          VD[8] = 1;
+          VD[7:4] = line_sprite_data[1].info.color;
+          VD[3:0] = {
+            line_sprite_data[1].data[0][15-(x_idx%16)],
+            line_sprite_data[1].data[1][15-(x_idx%16)],
+            line_sprite_data[1].data[2][15-(x_idx%16)],
+            line_sprite_data[1].data[3][15-(x_idx%16)]
+          };
+        end
+        if (line_sprite_data[2].info.x_pos - 32 <= x_idx && x_idx < line_sprite_data[2].info.x_pos - 32 + 16 && line_sprite_idx > 1) begin
+          VD[8] = 1;
+          VD[7:4] = line_sprite_data[2].info.color;
+          VD[3:0] = {
+            line_sprite_data[2].data[0][15-(x_idx%16)],
+            line_sprite_data[2].data[1][15-(x_idx%16)],
+            line_sprite_data[2].data[2][15-(x_idx%16)],
+            line_sprite_data[2].data[3][15-(x_idx%16)]
+          };
+        end
+*/
     end
   end
-*/ 
-
-
 
 
  
@@ -932,9 +1054,7 @@ module vdc_HuC6270(input logic clock, reset_N,
         tile_pipe[i].CG0         <= 0;
         tile_pipe[i].CG1         <= 0;
       end
-      sprite_word_count <= 0;
       SATfetch_cur_entry <= 0;
-      cur_sprite_fetch <= 0;
     end
     else begin
       if(do_BGfetch) begin
@@ -962,22 +1082,8 @@ module vdc_HuC6270(input logic clock, reset_N,
 
 
       else if (do_Spritefetch) begin
-        if (!(char_cycle & 3'd1)) begin
-          sprite_data[cur_sprite_fetch][sprite_word_count] <= MD_in; 
-          if (sprite_word_count == sprite_num_words - 1) begin
-
-//           if (cur_sprite_fetch == 1) begin
-            if (cur_sprite_fetch == $clog2(num_sprites) - 1) begin
-              cur_sprite_fetch <= 0;
-            end else begin
-              cur_sprite_fetch <= cur_sprite_fetch + 1;
-            end
-            sprite_word_count <= 0;
-          end
-          else begin
-            sprite_word_count <= sprite_word_count + 1;
-          end
-        end
+//        if (~first_Spritefetch_cycle)
+          line_sprite_data[prev_sprite_fetch].data[prev_sprite_word_idx] <= MD_in; 
       end
 
     end
@@ -1006,8 +1112,7 @@ module vdc_HuC6270(input logic clock, reset_N,
     end
 
     else if (do_Spritefetch) begin
-      if (char_cycle & 1) MA = (satb_entries[cur_sprite_fetch].addr << 5) + sprite_word_count;
-      else MA = 0;
+      MA = line_sprite_info[cur_sprite_fetch].base_addr + (16'd16 * sprite_word_idx);
     end
 
     else MA = 0;
@@ -1086,105 +1191,6 @@ module vdc_HuC6270(input logic clock, reset_N,
   
 
 
-/*
-  // This entire FSM is just to test the BRAM. DISREGARD
-  enum logic [3:0] {WAIT, READ, WRITE, END} state, next_state;
-
-  always_comb begin
-
-    wren = 0;
-    data_in = 16'd0;
-
-    unique case (state)
-
-      WAIT: begin
-
-        next_state = WRITE;
-        wren = 1'b1;
-        data_in = 16'hF0F0;
-
-      end
-
-      WRITE: begin
-
-        next_state = READ;
-
-      end
-
-      READ, END: begin
-
-        next_state = END;
-
-      end
-
-    endcase
-
-  end
-
-  always_ff @(posedge clock, negedge reset_N) begin
-    if (~reset_N)
-      state <= WAIT;
-    else
-      state <= next_state;
-
-  end
-*/
-
 endmodule : vdc_HuC6270;
 
 
-
-/*
-module top();
-
-  logic clock, CS_n, WR_n, reset_N, dummy;
-  logic [15:0] D;
-
-  vdc_HuC6270 vdc(.*);
-
-  // This entire TB is just to make sure the BRAM is working
-  // in simulation. Disregard all of this
-
-  initial begin
-    $monitor("state: %s data_out: %x", vdc.state, vdc.data_out);
-    clock = 1'b0;
-    reset_N = 1'b0;
-    reset_N <= 1'b1;
-    forever #5 clock = ~clock;
-  end
-
-  initial begin
-
-    @(posedge clock);
-    @(posedge clock);
-    @(posedge clock);
-    @(posedge clock);
-
-    $finish;
-  end
-
-endmodule: top
-*/
-
-
-
-
-
-// Old VDC inputs, not needed but going to keep here in case it's ever useful
-/*
-                    inout logic [7:0]  D_low,
-                    inout logic [8:15] D_hi,
-                    input logic EW_8_16,     // Data bus width select (8 en, 16 dis), UNUSED
-                    inout logic VSYNC_n,
-                    inout logic HSYNC_n,
-                    output logic DISP, // screen blanking status (blanked dis, displayed en)
-                    inout logic SPBG,  // pixel bus (sprite en, bkgrnd dis) (VD8)
-                    inout logic [7:0] VD,
-                    output logic MWR_n, // VRAM write strobe
-                    output logic MRD_n, // VRAM read strobe
-                    inout logic [15:0] MD, // VRAM Data bus
-                    output logic [15:0] MA, // VRAM Address bus
-                    output logic IRQ_n, // IRQ output to HuC6280
-                    output logic BUSY_n, // BUSY status output
-                    input logic [1:0] A);
-*/
