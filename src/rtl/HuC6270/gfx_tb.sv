@@ -54,11 +54,13 @@ module gfx_tb;
     while(frame_count < 3) begin
       while(!(vdc.V_state == V_END && vdc.V_cnt == 0 && vdc.EOL)) begin
         #20;
-        if (vdc.do_Spritefetch) begin
-//          $display("MA: %x, MD_in: %x, sprite_word_count: %d char_cycle: %d", vdc.MA, vdc.MD_in, vdc.sprite_word_count, vdc.char_cycle);
-        end
+//        $display("%d, H_state: %s, H_cnt: %d, V_state: %s, V_cnt: %d", frame_count, vdc.H_state, vdc.H_cnt, vdc.V_state, vdc.V_cnt);
+        if (vdc.do_Spritecrawl) begin
+//          $display("satb_idx: %d, line_sprite_idx: %d", vdc.satb_idx, vdc.line_sprite_idx);
+        end	
       end
       frame_count++;
+      $display("finish frame");
 //      force vdc.BXR  = 4*frame_count;
 //      force vdc.BYR  = 4*frame_count;
       while(vdc.V_state == V_END && vdc.V_cnt == 0 && vdc.EOL) #10 continue;

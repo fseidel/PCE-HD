@@ -111,6 +111,23 @@ typedef struct packed {
   logic [3:0] color;   // which of 16 sprite palettes to use
 } satb_entry_t;
 
+// Representation of the sprite INFO for one line (for a 16x16 chunk)
+typedef struct packed {
+  logic [9:0] x_pos;            // X position for this sprite
+  logic x_invert;
+  logic y_invert;
+  logic SPBG;
+  logic [15:0] base_addr;       // The base address for this 1x16 pixel chunk
+} line_sprite_info_t;
+
+// Representation of the sprite DATA for one line (for a 16x16 chunk)
+typedef struct {
+  line_sprite_info_t info;
+  logic [15:0] data[4];
+} line_sprite_data_t;
+
+// Representation 
+
 // VDC Status Register
 typedef struct packed {
   logic dummy; // Always set to 0
