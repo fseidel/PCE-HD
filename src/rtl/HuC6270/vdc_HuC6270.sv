@@ -1202,7 +1202,6 @@ module vdc_HuC6270(input logic clock, reset_N,
 
       if (selected_valid_final) begin
 
-
         if (~selected_SPBG_final) begin
           // If it's a background pixel and the BG pixel is the 0
           // pixel, then draw the sprite
