@@ -226,8 +226,11 @@ module vdc_HuC6270(input logic clock, reset_N,
                             (H_state == H_SYNC || (H_state == H_WAIT && H_cnt >= 2)));
 
 
-  logic do_Linearrange;
-  assign do_Linearrange = (V_state == V_DISP && H_state == H_WAIT && H_cnt < 2);
+  logic do_Pixelselect;
+  assign do_Pixelselect = (H_state == H_WAIT && H_cnt == 0 && char_cycle >= 6) ||
+                          (H_state == H_DISP && H_cnt != 0)                    ||
+                          (H_state == H_DISP && H_cnt == 0 && char_cycle < 6);
+
 /*
   assign do_Spritefetch = ((H_state == H_SYNC) || (H_state == H_WAIT) || (H_state == H_END)) &&
                           (V_state == V_DISP) && 
@@ -605,7 +608,7 @@ module vdc_HuC6270(input logic clock, reset_N,
     // When to reset OR clear to prep for next cycle,
     // which is when we're about to start H_DISP
     if ((~reset_N) ||
-        (H_state == H_WAIT && H_cnt == 0)) begin
+        (H_state == H_WAIT && H_cnt == 0 && char_cycle == 7)) begin
       satb_idx <= 7'd0;
       line_sprite_idx <= 5'd0;
       second_half <= 1'd0;
@@ -708,6 +711,249 @@ module vdc_HuC6270(input logic clock, reset_N,
   /////////////////////////////////////////////////////
   // LINE ARRANGE FSM
 
+  // Index for which pixel we're looking at
+  logic [7:0] pix_idx;
+  logic [4:0] num_valid_sprites;
+
+  // First stage of pipelne
+  logic       selected_valid_initial[4];
+  logic [3:0] selected_color_initial[4];
+  logic [3:0] selected_px_initial[4];
+  logic       selected_SPBG_initial[4];
+
+  logic sprite_horizontal_intersect[16];
+
+  // Second stage of pipeline
+  logic       selected_valid_final;
+  logic [3:0] selected_color_final;
+  logic [3:0] selected_px_final;
+  logic       selected_SPBG_final;
+
+
+  logic [3:0] color_temp[16];
+  logic [3:0] px_temp[16];
+  logic       SPBG_temp[16];
+
+  genvar i;
+  generate
+    for (i = 0; i < 16; i++) begin : gen_horiz_intersect
+      always_comb begin
+
+
+        // Separate, fetching the correct temp value for each sprite.
+        color_temp[i] = line_sprite_data[i].info.color;
+        px_temp[i] = {
+          line_sprite_data[i].data[3][15 - (pix_idx - (line_sprite_data[i].info.x_pos - 32))],
+          line_sprite_data[i].data[2][15 - (pix_idx - (line_sprite_data[i].info.x_pos - 32))],
+          line_sprite_data[i].data[1][15 - (pix_idx - (line_sprite_data[i].info.x_pos - 32))],
+          line_sprite_data[i].data[0][15 - (pix_idx - (line_sprite_data[i].info.x_pos - 32))]
+//          line_sprite_data[i].data[3][15-(pix_idx%16)],
+//          line_sprite_data[i].data[2][15-(pix_idx%16)],
+//          line_sprite_data[i].data[1][15-(pix_idx%16)],
+//          line_sprite_data[i].data[0][15-(pix_idx%16)]
+        };
+//        px_temp[i] = 4'hF;
+        SPBG_temp[i] = line_sprite_data[i].info.SPBG;
+
+        sprite_horizontal_intersect[i] = 1'b0;
+
+        // Only bother checking if this entry even is a valid sprite
+        if (i < num_valid_sprites) begin
+
+          if (px_temp[i] != 0) begin
+
+            // Check if this sprite collides with the current pix
+            if (line_sprite_data[i].info.x_pos - 32 <= pix_idx && 
+                pix_idx < line_sprite_data[i].info.x_pos - 32 + 16) begin
+
+              sprite_horizontal_intersect[i] = 1'b1;
+
+            end
+
+          end
+        end
+
+
+      end
+    end : gen_horiz_intersect
+  endgenerate
+
+
+  logic [3:0] first_stage_chunk_present;
+
+  // Check 
+  always_comb begin
+
+    first_stage_chunk_present[0] = (sprite_horizontal_intersect[0] ||
+                                    sprite_horizontal_intersect[1] ||
+                                    sprite_horizontal_intersect[2] ||
+                                    sprite_horizontal_intersect[3]);
+
+    first_stage_chunk_present[1] = (sprite_horizontal_intersect[4] ||
+                                    sprite_horizontal_intersect[5] ||
+                                    sprite_horizontal_intersect[6] ||
+                                    sprite_horizontal_intersect[7]);                                    
+    first_stage_chunk_present[2] = (sprite_horizontal_intersect[8] ||
+                                    sprite_horizontal_intersect[9] ||
+                                    sprite_horizontal_intersect[10] ||
+                                    sprite_horizontal_intersect[11]);
+
+    first_stage_chunk_present[3] = (sprite_horizontal_intersect[12] ||
+                                    sprite_horizontal_intersect[13] ||
+                                    sprite_horizontal_intersect[14] ||
+                                    sprite_horizontal_intersect[15]);
+    
+
+  end
+
+  always_ff @(posedge clock, negedge reset_N) begin
+
+    if (~reset_N || 
+        (H_state == H_WAIT && H_cnt == 0 && char_cycle == 6)) begin
+      pix_idx = 8'd0;
+      num_valid_sprites <= line_sprite_idx;
+    end
+
+    else begin
+
+      if (do_Pixelselect) begin
+
+        pix_idx <= pix_idx + 8'd1;
+
+        // FIRST PIPELINE STAGE
+        selected_valid_initial[0] <= first_stage_chunk_present[0]; 
+        selected_valid_initial[1] <= first_stage_chunk_present[1]; 
+        selected_valid_initial[2] <= first_stage_chunk_present[2]; 
+        selected_valid_initial[3] <= first_stage_chunk_present[3]; 
+
+        if (first_stage_chunk_present[0]) begin
+
+          selected_color_initial[0] <= (sprite_horizontal_intersect[0]) ? color_temp[0] :
+                                       (sprite_horizontal_intersect[1]) ? color_temp[1] :
+                                       (sprite_horizontal_intersect[2]) ? color_temp[2] :
+                                                                          color_temp[3];
+
+
+          
+          selected_px_initial[0] <= (sprite_horizontal_intersect[0]) ? px_temp[0] :
+                                    (sprite_horizontal_intersect[1]) ? px_temp[1] :
+                                    (sprite_horizontal_intersect[2]) ? px_temp[2] :
+                                                                       px_temp[3];
+
+          selected_SPBG_initial[0] <= (sprite_horizontal_intersect[0]) ? SPBG_temp[0] :
+                                      (sprite_horizontal_intersect[1]) ? SPBG_temp[1] :
+                                      (sprite_horizontal_intersect[2]) ? SPBG_temp[2] :
+                                                                         SPBG_temp[3];
+
+        end
+
+        else if (first_stage_chunk_present[1]) begin
+
+          selected_color_initial[1] <= (sprite_horizontal_intersect[4]) ? color_temp[4] :
+                                       (sprite_horizontal_intersect[5]) ? color_temp[5] :
+                                       (sprite_horizontal_intersect[6]) ? color_temp[6] :
+                                                                          color_temp[7];
+
+          
+          selected_px_initial[1] <= (sprite_horizontal_intersect[4]) ? px_temp[4] :
+                                    (sprite_horizontal_intersect[5]) ? px_temp[5] :
+                                    (sprite_horizontal_intersect[6]) ? px_temp[6] :
+                                                                       px_temp[7];
+
+          selected_SPBG_initial[1] <= (sprite_horizontal_intersect[4]) ? SPBG_temp[4] :
+                                      (sprite_horizontal_intersect[5]) ? SPBG_temp[5] :
+                                      (sprite_horizontal_intersect[6]) ? SPBG_temp[6] :
+                                                                         SPBG_temp[7];
+
+        end
+
+        else if (first_stage_chunk_present[2]) begin
+
+          selected_color_initial[2] <= (sprite_horizontal_intersect[8])  ? color_temp[8] :
+                                       (sprite_horizontal_intersect[9])  ? color_temp[9] :
+                                       (sprite_horizontal_intersect[10]) ? color_temp[10] :
+                                                                           color_temp[11];
+
+          
+          selected_px_initial[2] <= (sprite_horizontal_intersect[8]) ? px_temp[8] :
+                                    (sprite_horizontal_intersect[9]) ? px_temp[9] :
+                                    (sprite_horizontal_intersect[10]) ? px_temp[10] :
+                                                                        px_temp[11];
+
+          selected_SPBG_initial[2] <= (sprite_horizontal_intersect[8]) ? SPBG_temp[8] :
+                                      (sprite_horizontal_intersect[9]) ? SPBG_temp[9] :
+                                      (sprite_horizontal_intersect[10]) ? SPBG_temp[10] :
+                                                                          SPBG_temp[11];
+
+        end
+
+        else if (first_stage_chunk_present[3]) begin
+
+          selected_color_initial[3] <= (sprite_horizontal_intersect[12]) ? color_temp[12] :
+                                       (sprite_horizontal_intersect[13]) ? color_temp[13] :
+                                       (sprite_horizontal_intersect[14]) ? color_temp[14] :
+                                                                           color_temp[15];
+
+          
+          selected_px_initial[3] <= (sprite_horizontal_intersect[12]) ? px_temp[12] :
+                                    (sprite_horizontal_intersect[13]) ? px_temp[13] :
+                                    (sprite_horizontal_intersect[14]) ? px_temp[14] :
+                                                                        px_temp[15];
+
+          selected_SPBG_initial[3] <= (sprite_horizontal_intersect[12]) ? SPBG_temp[12] :
+                                      (sprite_horizontal_intersect[13]) ? SPBG_temp[13] :
+                                      (sprite_horizontal_intersect[14]) ? SPBG_temp[14] :
+                                                                          SPBG_temp[15];
+
+        end
+
+
+        // SECOND PIPELINE STAGE
+        selected_valid_final <= (selected_valid_initial[3] || 
+                                selected_valid_initial[2] ||
+                                selected_valid_initial[1] ||
+                                selected_valid_initial[0]);
+
+        if (selected_valid_initial[0]) begin
+
+          selected_color_final <= selected_color_initial[0];
+          selected_px_final <= selected_px_initial[0];
+          selected_SPBG_final <= selected_SPBG_initial[0];
+
+        end
+
+        else if (selected_valid_initial[1]) begin
+
+          selected_color_final <= selected_color_initial[1];
+          selected_px_final <= selected_px_initial[1];
+          selected_SPBG_final <= selected_SPBG_initial[1];
+
+        end
+
+        else if (selected_valid_initial[2]) begin
+
+          selected_color_final <= selected_color_initial[2];
+          selected_px_final <= selected_px_initial[2];
+          selected_SPBG_final <= selected_SPBG_initial[2];
+
+        end
+
+        else if (selected_valid_initial[3]) begin
+
+          selected_color_final <= selected_color_initial[3];
+          selected_px_final <= selected_px_initial[3];
+          selected_SPBG_final <= selected_SPBG_initial[3];
+
+        end
+
+      end
+
+    end
+
+  end
+
+// OLD LINE ARRANGE FSM, WRONG
+/*
   logic [3:0] sprite_arrange_idx;
   logic [4:0] disp_cycle_sprite_idx[16];
 
@@ -754,7 +1000,7 @@ module vdc_HuC6270(input logic clock, reset_N,
     end
 
   end
-
+*/
   // Stuff from FORD
   /* 
 
@@ -954,86 +1200,49 @@ module vdc_HuC6270(input logic clock, reset_N,
     VD = 0;
     if(in_vdw) begin //TODO: make this work correctly with new VSYNC
 
-/*
-//      if ((left <= x_idx && x_idx < right && top <= y_idx && y_idx < bot) &&
-      if ((left[1] <= x_idx && x_idx < right[1] && top[1] <= y_idx && y_idx < bot[1]) &&
-          first_frame_done) begin
+      if (selected_valid_final) begin
 
-        if (tile_pix != 0) begin
-          VD[8] = 0;
-          VD[7:4] = output_tile.palette_num;
-          VD[3:0] = tile_pix;
-        end else begin
+        $display("pixel valid!");
 
-        VD[8] = 1;
-        VD[7:4] = satb_entries[1].color;
-        VD[3:0] = cur_pix[1];
+        if (~selected_SPBG_final) begin
+          $display("Pixel SPBG");
+          // If it's a background pixel and the BG pixel is the 0
+          // pixel, then draw the sprite
+          if (tile_pix == 0) begin 
+            VD[8] = 1;
+            VD[7:4] = selected_color_final;
+            VD[3:0] = selected_px_final;
+          end
+
+          // If the BG pixel is NOT 0 (i.e. in front of the sprite)
+          // then draw the BG
+          else begin
+            VD[8] = 0;
+            VD[7:4] = output_tile.palette_num;
+            VD[3:0] = tile_pix;
+          end
+
         end
-      end else if ((left[0] <= x_idx && x_idx < right[0] && top[0] <= y_idx && y_idx < bot[0]) &&
-          first_frame_done) begin
 
-        if (tile_pix != 0) begin
-          VD[8] = 0;
-          VD[7:4] = output_tile.palette_num;
-          VD[3:0] = tile_pix;
-        end else begin
-        VD[8] = 1;
-        VD[7:4] = satb_entries[0].color;
-        VD[3:0] = cur_pix[0]; 
+        else begin
+
+          VD[8] = 1;
+          VD[7:4] = selected_color_final;
+          VD[3:0] = selected_px_final;
+
         end
-      end else begin
-*/
+
+      end
+
+      else begin
+
       	VD[8]    = 0; //BG selected
       	VD[7:4]  = output_tile.palette_num;
       	VD[3:0]  = tile_pix;
         if (tile_pix == 0)
           VD[7:4] = 0;
 
-        if (disp_cycle_sprite_idx[x_idx / 16][4]) begin
-
-          VD[8] = 1;
-          VD[7:4] = line_sprite_data[disp_cycle_sprite_idx[x_idx/16][3:0]].info.color;
-          VD[3:0] = {
-            line_sprite_data[disp_cycle_sprite_idx[x_idx/16][3:0]].data[3][15-(x_idx%16)],
-            line_sprite_data[disp_cycle_sprite_idx[x_idx/16][3:0]].data[2][15-(x_idx%16)],
-            line_sprite_data[disp_cycle_sprite_idx[x_idx/16][3:0]].data[1][15-(x_idx%16)],
-            line_sprite_data[disp_cycle_sprite_idx[x_idx/16][3:0]].data[0][15-(x_idx%16)]
-          };
-
-
-        end    
-/*
-        if (line_sprite_data[0].info.x_pos - 32 <= x_idx && x_idx < line_sprite_data[0].info.x_pos - 32 + 16 && line_sprite_idx != 0) begin
-          VD[8] = 1;
-          VD[7:4] = line_sprite_data[0].info.color;
-          VD[3:0] = {
-            line_sprite_data[0].data[0][15-(x_idx%16)],
-            line_sprite_data[0].data[1][15-(x_idx%16)],
-            line_sprite_data[0].data[2][15-(x_idx%16)],
-            line_sprite_data[0].data[3][15-(x_idx%16)]
-          };
-        end
-        if (line_sprite_data[1].info.x_pos - 32 <= x_idx && x_idx < line_sprite_data[1].info.x_pos - 32 + 16 && line_sprite_idx > 0) begin
-          VD[8] = 1;
-          VD[7:4] = line_sprite_data[1].info.color;
-          VD[3:0] = {
-            line_sprite_data[1].data[0][15-(x_idx%16)],
-            line_sprite_data[1].data[1][15-(x_idx%16)],
-            line_sprite_data[1].data[2][15-(x_idx%16)],
-            line_sprite_data[1].data[3][15-(x_idx%16)]
-          };
-        end
-        if (line_sprite_data[2].info.x_pos - 32 <= x_idx && x_idx < line_sprite_data[2].info.x_pos - 32 + 16 && line_sprite_idx > 1) begin
-          VD[8] = 1;
-          VD[7:4] = line_sprite_data[2].info.color;
-          VD[3:0] = {
-            line_sprite_data[2].data[0][15-(x_idx%16)],
-            line_sprite_data[2].data[1][15-(x_idx%16)],
-            line_sprite_data[2].data[2][15-(x_idx%16)],
-            line_sprite_data[2].data[3][15-(x_idx%16)]
-          };
-        end
-*/
+      end
     end
   end
 
