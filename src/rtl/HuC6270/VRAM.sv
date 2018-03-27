@@ -24,7 +24,7 @@ module VRAM (input clock, reset_N,
     if(~reset_N) begin
       MD_out    <= 0;
       for(int i = 0; i < 2<<15; i++) begin
-        //VRAM_ARR[i] <= 0; //some games think VRAM is 0 at the start
+        VRAM_ARR[i] <= 0; //some games think VRAM is 0 at the start
       end
       //$readmemh("GFX.hex", VRAM_ARR);
     end
