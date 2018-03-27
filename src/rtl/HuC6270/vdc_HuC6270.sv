@@ -138,8 +138,8 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en,
 
   
   //assign y_shift = (MWR[6]) ? 6 : 5; //yet another hack
-  assign x_mask = (1 << 9) - 1;
-  assign y_mask = (1 << 9) - 1; //ditto
+  assign x_mask = (1 << y_shift) - 1;
+  assign y_mask = (1 << (MWR[6] + 8)) - 1; //ditto
   assign x_px_offset  = x_start[2:0];
   assign x_tl_offset  = x_start[9:3];
   assign y_px_offset  = y_start[2:0];
@@ -666,17 +666,22 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en,
 
   logic [2:0]  cycle_adjusted;
   assign cycle_adjusted = char_cycle + x_px_offset;
+
+  logic [3:0]  BG_color;
+  assign BG_color = {output_tile.CG1[15 - cycle_adjusted],
+                     output_tile.CG1[7 - cycle_adjusted], 
+                     output_tile.CG0[15 - cycle_adjusted],
+                     output_tile.CG0[7 - cycle_adjusted]};
   
   always_comb begin
     VD = 0;
     if(in_vdw) begin //TODO: make this work correctly with new VSYNC
       VD[8]    = 0; //BG selected
-      VD[7:4]  = output_tile.palette_num;
-      VD[3:0]  = {output_tile.CG1[15 - cycle_adjusted],
-                  output_tile.CG1[7 - cycle_adjusted], 
-                  output_tile.CG0[15 - cycle_adjusted],
-                  output_tile.CG0[7 - cycle_adjusted]};
+      VD[7:4]  = (BG_color) ? output_tile.palette_num : 0;
+      VD[3:0]  = BG_color;
     end
+    else
+      VD[8]  = 1; //sprite palette 0, color 0 in overscan
   end
   
   logic [15:0] tile_ptr;
@@ -726,11 +731,14 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en,
     else MA = CPU_maddr;
   end
 
+
+  logic  [10:0] cur_col; //COL IN TILES, ROW IN PIXELS
+  assign bat_ptr = cur_col + ((((cur_row + y_start) & y_mask) >> 3) << y_shift);
   //BAT pointer management
   always_ff @(posedge clock, negedge reset_N) begin
     if(~reset_N) begin
-      bat_ptr <= 0;
       cur_row <= 0; //TODO: actually handle this correctly
+      cur_col <= 0;
     end
     else if(clock_en) begin
       if(V_state == V_WAIT) cur_row <= 0; //latch to 0 right before drawing
@@ -738,12 +746,11 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en,
         cur_row <= cur_row + 1; //TODO: need to initialize cur_row
       end
       else if(H_state == H_SYNC && H_cnt == 0 && char_cycle == 7) begin
-        bat_ptr <= (x_tl_offset & x_mask) + 
-                   ((((cur_row + y_start) >> 3) & y_mask) << y_shift);
+        cur_col <= x_tl_offset;
       end
       else if(do_BGfetch) begin
         if(char_cycle == 7)
-          bat_ptr <= bat_ptr + 1; //TODO: scrolling still broken
+          cur_col <= (cur_col + 1) & x_mask;
       end
     end
   end
