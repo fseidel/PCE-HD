@@ -192,7 +192,7 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en,
       MARR               <= 0;
       BXR                <= 0;
       BYR                <= 0;
-      MWR                <= 0;
+      MWR                <= 16'h10; //Gunhed HACK
     end
     else begin
       if(clock_en) begin
@@ -656,21 +656,27 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en,
 
   logic [15:0] sprite_base_addr;
   logic [9:0] temp_y;
-  assign temp_y = next_line - cur_top;
+  logic [6:0] sprite_y_mask;
+  assign sprite_y_mask  = (cur_entry.CGY == HEIGHT_16) ? 6'hF :
+                          (cur_entry.CGY == HEIGHT_32) ? 6'h1F :
+                                                         6'h3F;
+  
+  assign temp_y = ((next_line - cur_top) ^ {10{cur_entry.y_invert}}) 
+                  & sprite_y_mask;
 
   // Logic to determine sprite_base_addr
   always_comb begin
 
-    if (~second_half) begin
+    if (~(second_half ^ cur_entry.x_invert)) begin
       sprite_base_addr = (cur_entry.addr << 5) +
-                         (temp_y % 16) +
-                         ((temp_y / 16) * 128);
+                         (temp_y & 4'hF) +
+                         ((temp_y >> 4) << 7);
     end
 
     else begin
       sprite_base_addr = (cur_entry.addr << 5) +
-                         (temp_y % 16) +
-                         ((temp_y / 16) * 128) +
+                         (temp_y & 4'hF) +
+                         ((temp_y >> 4) << 7) +
                          (64); // Add extra 64 to get to second half
     end
 
@@ -912,10 +918,17 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en,
         // Separate, fetching the correct temp value for each sprite.
         color_temp[i] = line_sprite_data[i].info.color;
         px_temp[i] = {
-          line_sprite_data[i].data[3][15 - (local_pix_idx[i] - (line_sprite_data[i].info.x_pos - 32))],
-          line_sprite_data[i].data[2][15 - (local_pix_idx[i] - (line_sprite_data[i].info.x_pos - 32))],
-          line_sprite_data[i].data[1][15 - (local_pix_idx[i] - (line_sprite_data[i].info.x_pos - 32))],
-          line_sprite_data[i].data[0][15 - (local_pix_idx[i] - (line_sprite_data[i].info.x_pos - 32))]
+          line_sprite_data[i].data[3][15 - (local_pix_idx[i] - 
+          (line_sprite_data[i].info.x_pos - 32))],
+                      
+          line_sprite_data[i].data[2][15 - (local_pix_idx[i] - 
+          (line_sprite_data[i].info.x_pos - 32))],
+                      
+          line_sprite_data[i].data[1][15 - (local_pix_idx[i] - 
+          (line_sprite_data[i].info.x_pos - 32))],
+                      
+          line_sprite_data[i].data[0][15 - (local_pix_idx[i] - 
+          (line_sprite_data[i].info.x_pos - 32))]
         };
 
         SPBG_temp[i] = line_sprite_data[i].info.SPBG;
@@ -1139,6 +1152,12 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en,
   assign curbat  = MD_in;
   assign fetch_row = y_px_offset + cur_row;
   logic [15:0] bat_ptr;
+  logic [15:0] MD_invert; //MD_in with bits swapped (0->15, 1->14, etc.)
+  always_comb begin
+    for(int i = 0; i < 16; i++)
+      MD_invert[i] = MD_in[15-i];
+  end
+
   
   //background pipeline
   always_ff @(posedge clock, negedge reset_N) begin
@@ -1178,7 +1197,10 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en,
 
       else if (do_Spritefetch) begin
 //        if (~first_Spritefetch_cycle)
-          line_sprite_data[cur_sprite_fetch].data[sprite_word_idx] <= MD_in; 
+        if(~line_sprite_data[cur_sprite_fetch].info.x_invert)
+          line_sprite_data[cur_sprite_fetch].data[sprite_word_idx] <= MD_in;
+        else
+          line_sprite_data[cur_sprite_fetch].data[sprite_word_idx] <= MD_invert;
       end
 
     end

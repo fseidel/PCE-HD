@@ -34,8 +34,8 @@ module fullsys_tb;
   assign RD_n  = ~RE;
   assign WR_n  = ~WE;
  
-  assign RDY_n = ~BUSY_n;
-  //assign RDY_n = 1'b1;
+  //assign RDY_n = ~BUSY_n;
+  assign RDY_n = 1'b1;
   
 
   assign IRQ2_n = 1'b1;
@@ -89,7 +89,7 @@ module fullsys_tb;
     reset_N      = 1'b0;
     #100 reset_N <= 1'b1;
     do_write    <= 1'b1;
-    while(frame_count < 300) #10 continue; //352
+    while(frame_count < 3) #10 continue; //352
     //while(VIDEO_R == 0 && VIDEO_G == 0 && VIDEO_B == 0) #10 continue;
       //force vdc.BXR  = 4*frame_count;
       //force vdc.BYR  = 4*frame_count;
@@ -98,7 +98,7 @@ module fullsys_tb;
     if(log_enabled) begin
       do_write <= 1'b0;
       $fclose(f);
-      $system({"gzip ", filename});
+      $system({"gzip -f ", filename});
     end
     if(pclog_enabled) begin
       $fclose(pclog);
@@ -113,14 +113,14 @@ module fullsys_tb;
       cycle++;
       if(CPU.state == 12 && CPU.RDY && clock) //DECODE
         $fwrite(pclog, "%04X\n", CPU.PC-1);
-      /*if(frame_count >= 250)
+      if(frame_count >= 250)
 	    force CPU.PAD_out = 8'b1111_0111; // Region bit == Japan*/
       if(vdc.V_state == V_END && vdc.V_cnt == 0 &&
          vdc.EOL && clock_en && clock) begin
         frame_count++;
         $display("frame %d", frame_count);
       end
-      if(log_enabled && do_write && clock_en && (frame_count >= 80)) //500
+      if(log_enabled && do_write && clock_en && (frame_count >= 0)) //500
         $fwrite(f, "%3d %3d %3d %b %b\n", R, G, B, HSYNC_n, VSYNC_n);
     end
   end

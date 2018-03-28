@@ -7,7 +7,7 @@
  */
 
 `define SIMULATION
-//`define FAKE_VRAM
+`define FAKE_VRAM
 
 module VRAM (input clock, reset_N,
              input logic [15:0] MA,     // Address signals to VRAM
@@ -29,7 +29,7 @@ module VRAM (input clock, reset_N,
         VRAM_ARR[i] = 0; //some games think VRAM is 0 at the start
       end
  `ifdef FAKE_VRAM
-      $readmemh("GFX.hex", VRAM_ARR);
+      $readmemh("gunhed_GFX.hex", VRAM_ARR);
  `endif
     end
     else if(re)

@@ -8,7 +8,7 @@
 
 
 `define SIMULATION
-//`define FAKE_CRAM
+`define FAKE_CRAM
 
 module vce_HuC6260( input logic clock, reset_N,
 
@@ -115,7 +115,7 @@ module vce_HuC6260( input logic clock, reset_N,
       CTA <= 9'h000;
       CTW <= 16'h0000;
 `ifdef FAKE_CRAM   //load CRAM image
-      $readmemh("PAL.hex", FAKE_CRAM);
+      $readmemh("gunhed_PAL.hex", FAKE_CRAM);
       for(int i = 0; i < 512; i++) begin
         CRAM[i] = FAKE_CRAM[i][8:0];
       end
