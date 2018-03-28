@@ -120,7 +120,7 @@ module fullsys_tb;
         frame_count++;
         $display("frame %d", frame_count);
       end
-      if(log_enabled && do_write && clock_en && (frame_count >= 250)) //500
+      if(log_enabled && do_write && clock_en && (frame_count >= 80)) //500
         $fwrite(f, "%3d %3d %3d %b %b\n", R, G, B, HSYNC_n, VSYNC_n);
     end
   end
