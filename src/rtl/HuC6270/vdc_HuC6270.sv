@@ -83,6 +83,8 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en,
   VSR_t VSR; // $0C
   VDR_t VDR; // $0D
   VCR_t VCR; // $0E
+  SATB_t SATB; // $13
+  assign SATB.data = 16'h7F00; // TODO: SET THIS
 
   //test values from parasol stars
   assign HSR = 16'h0202; // $0A
@@ -116,6 +118,8 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en,
   assign VDW  = VDR.VDW;
   assign VDE  = VCR.VDE;
   //VCR is passed through
+
+
 
   logic [2:0]  char_cycle; //current position in char cycle
 
@@ -294,6 +298,9 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en,
   end
 
 
+  localparam num_sprites = 64;
+  logic first_frame_done; 
+
   enum logic [1:0] {IDLE, READ, WRITE, WAIT}
        mem_state, mem_nextstate;
   
@@ -456,6 +463,176 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en,
                       (H_state == H_WAIT && H_cnt < 2)) && 
                       (V_state == V_DISP);
 
+  // SAT Fetch
+  logic do_SATfetch;
+  assign do_SATfetch = ((V_state == V_SYNC));
+  satb_entry_t satb_entries[num_sprites];
+  logic [$clog2(num_sprites) - 1 : 0] SATfetch_cur_entry;
+
+
+  // Sprite Crawl
+  logic do_Spritecrawl;
+  assign do_Spritecrawl = (V_state == V_WAIT && V_cnt == 0 && H_state == H_DISP) ||
+                          (V_state == V_DISP && V_cnt != 0 && H_state == H_DISP);
+
+  // Sprite Data Fetch
+  logic do_Spritefetch;
+  assign do_Spritefetch = (V_state == V_WAIT && V_cnt == 0 && H_state == H_END) ||
+                          (V_state == V_DISP && V_cnt != 0 && 
+                            (H_state == H_SYNC || (H_state == H_WAIT && H_cnt >= 2) || H_state == H_END)) ||
+                          (V_state == V_DISP && V_cnt == 0 &&
+                            (H_state == H_SYNC || (H_state == H_WAIT && H_cnt >= 2)));
+
+/*
+  logic do_Pixelselect;
+  assign do_Pixelselect = (H_state == H_WAIT && H_cnt == 0 && char_cycle >= 6) ||
+                          (H_state == H_DISP && H_cnt != 0)                    ||
+                          (H_state == H_DISP && H_cnt == 0 && char_cycle < 6);
+*/
+/*
+  assign do_Spritefetch = ((H_state == H_SYNC) || (H_state == H_WAIT) || (H_state == H_END)) &&
+                          (V_state == V_DISP) && 
+                          ~do_BGfetch &&
+                          first_frame_done;
+
+  logic [15:0] sprite_data[num_sprites][512];
+  logic [$clog2(num_sprites) - 1 : 0] cur_sprite_fetch;
+*/
+
+//  logic [9:0] sprite_word_count;
+
+//  logic [9:0] sprite_num_words;
+/*
+  always_comb begin
+
+    sprite_num_words = 10'd0;
+
+    case (satb_entries[cur_sprite_fetch].CGY) 
+
+      HEIGHT_16: begin
+
+        case (satb_entries[cur_sprite_fetch].CGX)
+
+          // 16 x 16
+          WIDTH_16: sprite_num_words = 10'd64;
+
+          // 32 x 16
+          WIDTH_32: sprite_num_words = 10'd128;
+
+        endcase
+
+      end
+
+      HEIGHT_32: begin
+
+        case (satb_entries[cur_sprite_fetch].CGX)
+
+          // 16 x 32
+          WIDTH_16: sprite_num_words = 10'd128;
+
+          // 32 x 32
+          WIDTH_32: sprite_num_words = 10'd256;
+
+        endcase
+
+      end
+
+      HEIGHT_64: begin
+
+        case (satb_entries[cur_sprite_fetch].CGX)
+
+          // 16 x 64
+          WIDTH_16: sprite_num_words = 10'd256;
+
+          // 32 x 64
+          WIDTH_32: sprite_num_words = 10'd512;
+
+        endcase
+
+      end
+
+
+    endcase
+
+  end
+*/
+
+/*
+  // Sprite fetching FSM
+  logic [5:0] block_y_idx;
+  logic [2:0]  block_x_idx;
+
+  logic [15:0] addr_offset;
+  always_comb begin
+    if (first_sprite.CGX == WIDTH_16) begin
+      addr_offset = (block_x_idx << 4) + block_y_idx;
+    end
+
+    else begin
+      addr_offset = (block_x_idx << 4) + ((block_y_idx >> 4) << 7) + block_y_idx;
+    end
+  end
+
+  
+  always_ff @(posedge clock, negedge reset_N) begin
+    if (~reset_N) begin
+      block_x_idx <= 3'd0;
+      block_y_idx <= 6'd0;
+    end
+
+    else begin
+
+      // Only increment anything if we're even spriteFetching
+      if (do_Spritefetch && (char_cycle & 1)) begin
+
+
+        // If we're 16 wide and we're at the end of a line, loop around
+        if ((block_x_idx == 3'd3) && (first_sprite.CGX == WIDTH_16)) begin
+          block_x_idx <= 3'd0;
+
+          if ((block_y_idx == 6'd15 && first_sprite.CGY == HEIGHT_16) ||
+              (block_y_idx == 6'd31 && first_sprite.CGY == HEIGHT_32) ||
+              (block_y_idx == 6'd63 && first_sprite.CGY == HEIGHT_64)) begin
+            block_y_idx <= 6'd0;
+          end
+
+          else begin
+            block_y_idx <= block_y_idx + 6'd1;
+          end
+
+        end
+
+                    SATfetch_cur_entry <= SATfetch_cur_entry + 1'd1;// If we're 32 wide and we're at the end of a line, loop around
+        else if (block_x_idx == 3'd7 && first_sprite.CGX == WIDTH_32) begin
+          block_x_idx <= 3'd0;
+          if ((block_y_idx == 6'd15 && first_sprite.CGY == HEIGHT_16) ||
+              (block_y_idx == 6'd31 && first_sprite.CGY == HEIGHT_32) ||
+              (block_y_idx == 6'd63 && first_sprite.CGY == HEIGHT_64)) begin
+            block_y_idx <= 6'd0;
+          end
+          else begin
+            block_y_idx <= block_y_idx + 6'd1;
+          end
+        end
+
+        // If we're not at the end of a line, only increase the fetch_count
+        else begin
+          block_x_idx <= block_x_idx + 3'd1;
+        end
+
+
+      end
+    end
+  end
+  */
+
+
+
+
+
+
+
+
 
   logic EOL; //signal for end of line
   assign EOL = (char_cycle == 7) && (H_state == H_END) && (H_cnt == 0);
@@ -524,6 +701,7 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en,
     if(~reset_N) begin
       V_cnt   <= VDS + 1;
       V_state <= V_WAIT;
+      first_frame_done <= 0;
     end
     else if(clock_en) begin
       if(EOL) begin
@@ -531,6 +709,7 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en,
         if(frame_reset) begin
           V_cnt <= VDS + 1;
           V_state <= V_WAIT;
+          first_frame_done <= 1;
         end
         // Decrement V_cnt at the end of a line
         else begin
@@ -609,6 +788,322 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en,
             NUM_BOT_BLANK_LINES) V_bot_blank  = 1;
     else V_sync = 1;
   end
+ 
+  // Keep the (x,y) indices in the display mode 
+  logic [15:0] x_idx, y_idx;
+  assign x_idx = ((HDW - H_cnt) << 3) + char_cycle;
+  assign y_idx = VDW - V_cnt;
+
+  ///////////////////////////////////////////////////////////////////////////
+  // SPRITE CRAWL FSM
+  ///////////////////////////////////////////////////////////////////////////
+
+  // Counter of what sprite we're looking at
+  logic [6:0] satb_idx;       
+
+  // How many sprites we've stored so far
+  logic [4:0] line_sprite_idx; 
+
+  // Our current SATB entry
+  satb_entry_t cur_entry;
+  assign cur_entry = satb_entries[satb_idx];
+
+  logic [9:0] next_line, cur_top, cur_bot;
+
+  // Look at the next line (plus a 64 line offset as per spec)
+  assign next_line = y_idx + 10'd64 + 10'd1;
+  assign cur_top = cur_entry.y_pos[9:0];
+  assign cur_bot = (cur_entry.CGY == HEIGHT_16) ? cur_top + 10'd16 :
+                   (cur_entry.CGY == HEIGHT_32) ? cur_top + 10'd32 :
+                                                  cur_top + 10'd64;
+  
+  // Check if the current sprite intersects with our next line
+  logic sprite_vertical_intersect;
+  assign sprite_vertical_intersect = (cur_top <= next_line) &&
+                                     (next_line < cur_bot);
+
+  line_sprite_info_t line_sprite_info[16];
+  logic second_half;
+
+  logic [15:0] sprite_base_addr;
+  logic [9:0] temp_y;
+  assign temp_y = next_line - cur_top;
+
+  // Logic to determine sprite_base_addr
+  always_comb begin
+
+    if (~second_half) begin
+      sprite_base_addr = (cur_entry.addr << 5) +
+                         (temp_y % 16) +
+                         ((temp_y / 16) * 128);
+    end
+
+    else begin
+      sprite_base_addr = (cur_entry.addr << 5) +
+                         (temp_y % 16) +
+                         ((temp_y / 16) * 128) +
+                         (64); // Add extra 64 to get to second half
+    end
+
+  end
+
+  always_ff @(posedge clock, negedge reset_N) begin
+ 
+    // When to reset OR clear to prep for next cycle,
+    // which is when we're about to start H_DISP
+    if ((~reset_N) ||
+        (H_state == H_WAIT && H_cnt == 0 && char_cycle == 7)) begin
+      satb_idx <= 7'd0;
+      line_sprite_idx <= 5'd0;
+      second_half <= 1'd0;
+    end
+
+    else begin
+
+      if (do_Spritecrawl) begin
+
+        // Check if there is space for more sprites or if 
+        // we've already checked all of the sprites
+        if (line_sprite_idx < 5'd16 && satb_idx < 7'd64) begin
+
+
+          if (second_half) begin
+
+//            if (satb_idx < 2)
+//              $display("second half! %x", sprite_base_addr);
+
+            // If we're on the second_half of a sprite, 
+            // assume double-wide and copy the data over.
+            line_sprite_info[line_sprite_idx].x_pos <= cur_entry.x_pos[9:0] + 10'd16;
+            line_sprite_info[line_sprite_idx].x_invert <= cur_entry.x_invert;
+            line_sprite_info[line_sprite_idx].y_invert <= cur_entry.y_invert;
+            line_sprite_info[line_sprite_idx].SPBG <= cur_entry.SPBG;
+            line_sprite_info[line_sprite_idx].base_addr <= sprite_base_addr;
+            line_sprite_info[line_sprite_idx].color <= cur_entry.color;
+
+            // Disable second_half
+            second_half <= 1'd0;
+
+            // Move onto next entry 
+            line_sprite_idx <= line_sprite_idx + 5'd1;
+
+            // Move onto next sprite
+            satb_idx <= satb_idx + 7'd1;
+
+          end // if (second_half) 
+
+          // Check if the next line happens to intersect with this sprite
+          else if (sprite_vertical_intersect) begin
+
+//            if (satb_idx < 2)
+//              $display("intersect! line_sprite_idx: %d, satb_idx: %d, addr: %x, temp_y: %d", line_sprite_idx, satb_idx, sprite_base_addr, temp_y);
+
+
+            // Save the Sprite information
+            if (cur_entry.CGX == WIDTH_16) begin
+
+              line_sprite_info[line_sprite_idx].x_pos <= cur_entry.x_pos[9:0];
+              line_sprite_info[line_sprite_idx].x_invert <= cur_entry.x_invert;
+              line_sprite_info[line_sprite_idx].y_invert <= cur_entry.y_invert;
+              line_sprite_info[line_sprite_idx].SPBG <= cur_entry.SPBG;
+              line_sprite_info[line_sprite_idx].base_addr <= sprite_base_addr;          
+              line_sprite_info[line_sprite_idx].color <= cur_entry.color;
+
+              // Move onto the next entry
+              line_sprite_idx <= line_sprite_idx + 5'd1;
+
+              // Move onto the next sprite
+              satb_idx <= satb_idx + 7'd1;
+
+            end // if (cur_entry.CGX == WIDTH_16)
+
+            else begin
+
+              line_sprite_info[line_sprite_idx].x_pos <= cur_entry.x_pos[9:0];
+              line_sprite_info[line_sprite_idx].x_invert <= cur_entry.x_invert;
+              line_sprite_info[line_sprite_idx].y_invert <= cur_entry.y_invert;
+              line_sprite_info[line_sprite_idx].SPBG <= cur_entry.SPBG;
+              line_sprite_info[line_sprite_idx].base_addr <= sprite_base_addr;          
+              line_sprite_info[line_sprite_idx].color <= cur_entry.color;
+
+              // Do NOT move onto the next sprite, but enable second_half
+              second_half <= 1'd1;
+
+              // Move onto the next entry
+              line_sprite_idx <= line_sprite_idx + 1'd1;
+
+            end // else
+
+          end // if (sprite_vertical_intersect) 
+
+          // If there's still sprites left to go but there was no 
+          // intersect (or second half), move onto the next sprite
+          else begin
+            satb_idx <= satb_idx + 7'd1;
+          end
+
+        end // if (line_sprite < 5'd16 && satb_idx < 7'd64) 
+
+      end // if (do_Spritecrawl) 
+
+
+    end // else 
+
+  end
+
+
+  /////////////////////////////////////////////////////
+  // LINE ARRANGE FSM
+
+  // Index for which pixel we're looking at
+  logic [7:0] pix_idx;
+  logic [4:0] num_valid_sprites;
+
+  logic [3:0] color_temp[16];
+  logic [3:0] px_temp[16];
+  logic       SPBG_temp[16];
+  logic sprite_present[16];
+
+  logic start_Pixelselect;
+  assign start_Pixelselect = (H_state == H_WAIT && H_cnt == 1 && char_cycle > 0) ||
+                             (H_state == H_WAIT && H_cnt == 0) ||
+                             (H_state == H_DISP && H_cnt > 1) ||
+                             (H_state == H_DISP && H_cnt == 1 && char_cycle == 0);
+
+  logic clear_Pixelselect;
+  assign clear_Pixelselect = (H_state == H_SYNC && H_cnt == 0 && char_cycle == 7);
+
+  logic do_Pixelselect[15];
+  logic [3:0] result_color[15];
+  logic [3:0] result_px[15];
+  logic result_SPBG[15];
+  logic result_present[15];
+
+  assign do_Pixelselect[0] = start_Pixelselect;
+
+  always_ff @(posedge clock, negedge reset_N) begin
+    if (~reset_N || clear_Pixelselect) begin
+      pix_idx <= 8'd0;
+      result_present[0] <= 1'b0;
+      num_valid_sprites <= line_sprite_idx;
+    end
+
+    else begin
+
+      // If it's time to start doing pixelselect, compare
+      // sprites 0 and 1;
+      if (do_Pixelselect[0]) begin
+
+        pix_idx <= pix_idx + 8'd1;
+
+        result_present[0] <= (sprite_present[0] || sprite_present[1]);
+
+        // Give priority to sprite 0 if it intersects
+        result_color[0]   <= (sprite_present[0]) ? color_temp[0] :
+                                                 color_temp[1];
+        result_px[0]      <= (sprite_present[0]) ? px_temp[0] :
+                                                   px_temp[1];
+        result_SPBG[0]    <= (sprite_present[0]) ? SPBG_temp[0] :
+                                                   SPBG_temp[1];
+
+      end
+
+    end
+  end
+
+  genvar j;
+  generate
+    for (j = 1; j < 15; j++) begin : gen_pixsel_reg
+
+      always_ff @(posedge clock, negedge reset_N) begin
+
+        if (~reset_N || clear_Pixelselect) begin
+          do_Pixelselect[j] <= 1'b0;
+          result_present[j] <= 1'b0;
+        end
+
+        else begin
+
+          // Always continue the pipeline enables
+          do_Pixelselect[j] <= do_Pixelselect[j - 1];
+
+          // Do the comparison if it's our pipeline step's turn
+          if (do_Pixelselect[j]) begin
+            
+            result_present[j] <= (result_present[j-1] || sprite_present[j+1]);
+
+            result_color[j]   <= (result_present[j-1]) ? result_color[j-1] :
+                                                         color_temp[j+1];
+            result_px[j]      <= (result_present[j-1]) ? result_px[j-1] :
+                                                         px_temp[j+1];
+
+            result_SPBG[j]    <= (result_present[j-1]) ? result_SPBG[j-1] :
+                                                         SPBG_temp[j+1];
+          end
+
+        end
+
+      end
+
+    end : gen_pixsel_reg
+
+  endgenerate
+
+
+
+  logic [7:0] local_pix_idx[16];
+  assign local_pix_idx[0] = pix_idx;
+  genvar k;
+  generate
+    for (k = 1; k < 16; k++) begin : gen_local_pix_idx
+      always_comb begin
+        local_pix_idx[k] = pix_idx - k + 1;
+      end
+    end : gen_local_pix_idx
+  endgenerate
+
+
+  genvar i;
+  generate
+    for (i = 0; i < 16; i++) begin : gen_horiz_intersect
+      always_comb begin
+
+
+        // Separate, fetching the correct temp value for each sprite.
+        color_temp[i] = line_sprite_data[i].info.color;
+        px_temp[i] = {
+          line_sprite_data[i].data[3][15 - (local_pix_idx[i] - (line_sprite_data[i].info.x_pos - 32))],
+          line_sprite_data[i].data[2][15 - (local_pix_idx[i] - (line_sprite_data[i].info.x_pos - 32))],
+          line_sprite_data[i].data[1][15 - (local_pix_idx[i] - (line_sprite_data[i].info.x_pos - 32))],
+          line_sprite_data[i].data[0][15 - (local_pix_idx[i] - (line_sprite_data[i].info.x_pos - 32))]
+        };
+
+        SPBG_temp[i] = line_sprite_data[i].info.SPBG;
+
+        sprite_present[i] = 1'b0;
+
+        // Only bother checking if this entry even is a valid sprite
+        if (i < num_valid_sprites) begin
+
+          if (px_temp[i] != 0) begin
+
+            // Check if this sprite collides with the current pix
+            if (line_sprite_data[i].info.x_pos - 32 <= local_pix_idx[i] && 
+                local_pix_idx[i] < line_sprite_data[i].info.x_pos - 32 + 16) begin
+
+              sprite_present[i] = 1'b1;
+
+            end
+
+          end
+        end
+
+
+      end
+    end : gen_horiz_intersect
+  endgenerate
+
+
 
   localparam BG_PIPE_LEN = 3; //we always write 2 ahead of our read
 
@@ -618,6 +1113,7 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en,
   
   assign output_tile = tile_pipe[bg_rd_ptr];
  
+
 
 
   // Logic to VCE telling it if we're currently in active display 
@@ -666,24 +1162,135 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en,
 
   logic [2:0]  cycle_adjusted;
   assign cycle_adjusted = char_cycle + x_px_offset;
-  
-  always_comb begin
-    VD = 0;
-    if(in_vdw) begin //TODO: make this work correctly with new VSYNC
-      VD[8]    = 0; //BG selected
-      VD[7:4]  = output_tile.palette_num;
-      VD[3:0]  = {output_tile.CG1[15 - cycle_adjusted],
+
+
+
+  ///////////////////////////////////////////////////////////////////////////
+  // SPRITE FETCH FSM
+  ///////////////////////////////////////////////////////////////////////////
+
+  // Which sprite we're fetching
+  logic [3:0] cur_sprite_fetch, prev_sprite_fetch;
+
+  // Which word we're fetching for the current sprite
+  logic [1:0] sprite_word_idx, prev_sprite_word_idx;
+
+  logic first_Spritefetch_cycle;
+
+  line_sprite_data_t line_sprite_data[16];
+
+  always_ff @(posedge clock, negedge reset_N) begin
+
+    if (~reset_N ||
+        (H_state == H_DISP && H_cnt == 0)) begin
+      cur_sprite_fetch <= 4'd0;
+      sprite_word_idx <= 2'd0;
+      prev_sprite_fetch <= 4'd0;
+      prev_sprite_word_idx <= 2'd0;
+      first_Spritefetch_cycle <= 1'd1;
+    end
+
+    else begin
+      first_Spritefetch_cycle <= 1'd0;
+
+      prev_sprite_fetch <= cur_sprite_fetch;
+      prev_sprite_word_idx <= sprite_word_idx;
+
+      if (do_Spritefetch) begin
+        // Copy over the info
+        if (sprite_word_idx == 2'd0) begin
+          line_sprite_data[cur_sprite_fetch].info <= line_sprite_info[cur_sprite_fetch];
+        end // if (sprite_word_idx == 2'd0)
+
+
+        if (sprite_word_idx == 2'd3) begin
+          cur_sprite_fetch <= cur_sprite_fetch + 4'd1;
+          sprite_word_idx <= 2'd0;
+        end // if (sprite_word_idx == 2'd3)
+
+        else begin
+          sprite_word_idx <= sprite_word_idx + 2'd1;
+        end // else
+        
+        
+      end // if (do_Spritefetch)
+
+    end // else
+
+  end // always_ff
+
+
+  logic [3:0] tile_pix;
+  assign tile_pix = {output_tile.CG1[15 - cycle_adjusted],
                   output_tile.CG1[7 - cycle_adjusted], 
                   output_tile.CG0[15 - cycle_adjusted],
                   output_tile.CG0[7 - cycle_adjusted]};
+
+  logic sprite_pixel_present;
+  logic [3:0] sprite_pixel_color;
+  logic [3:0] sprite_pixel_px;
+  logic sprite_pixel_SPBG;
+
+  assign sprite_pixel_present = result_present[14];
+  assign sprite_pixel_color   = result_color[14];
+  assign sprite_pixel_px      = result_px[14];
+  assign sprite_pixel_SPBG    = result_SPBG[14]; 
+
+  always_comb begin
+    VD = 0;
+    if(in_vdw) begin //TODO: make this work correctly with new VSYNC
+
+      if (sprite_pixel_present) begin
+
+        if (~sprite_pixel_SPBG) begin
+          // If it's a background pixel and the BG pixel is the 0
+          // pixel, then draw the sprite
+          if (tile_pix == 0) begin 
+            VD[8] = 1;
+            VD[7:4] = sprite_pixel_color;
+            VD[3:0] = sprite_pixel_px;;
+          end
+
+          // If the BG pixel is NOT 0 (i.e. in front of the sprite)
+          // then draw the BG
+          else begin
+            VD[8] = 0;
+            VD[7:4] = output_tile.palette_num;
+            VD[3:0] = tile_pix;
+          end
+
+        end
+
+        else begin
+
+          VD[8] = 1;
+          VD[7:4] = sprite_pixel_color;
+          VD[3:0] = sprite_pixel_px;
+
+        end
+
+      end
+
+      else begin
+
+      	VD[8]    = 0; //BG selected
+      	VD[7:4]  = output_tile.palette_num;
+      	VD[3:0]  = tile_pix;
+        if (tile_pix == 0)
+          VD[7:4] = 0;
+
+      end
     end
   end
-  
+
+
+ 
   logic [15:0] tile_ptr;
   logic [2:0]  fetch_row;
   bat_entry_t curbat;
   assign curbat  = MD_in;
   assign fetch_row = y_px_offset + cur_row;
+  logic [15:0] bat_ptr;
   
   //background pipeline
   always_ff @(posedge clock, negedge reset_N) begin
@@ -693,6 +1300,7 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en,
         tile_pipe[i].CG0         <= 0;
         tile_pipe[i].CG1         <= 0;
       end
+      SATfetch_cur_entry <= 0;
     end
     else if(clock_en) begin
       if(do_BGfetch) begin
@@ -706,9 +1314,29 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en,
           7: tile_pipe[bg_wr_ptr].CG1 <= MD_in;
         endcase
       end
+
+      else if (do_SATfetch) begin
+        case(char_cycle)
+          2: satb_entries[SATfetch_cur_entry][63:48] <= MD_in;
+          4: satb_entries[SATfetch_cur_entry][47:32] <= MD_in;
+          6: satb_entries[SATfetch_cur_entry][31:16] <= MD_in;
+          0: begin
+            satb_entries[SATfetch_cur_entry][15:0]  <= MD_in;
+            SATfetch_cur_entry <= SATfetch_cur_entry + 1;
+          end
+        endcase
+      end
+
+
+      else if (do_Spritefetch) begin
+//        if (~first_Spritefetch_cycle)
+          line_sprite_data[prev_sprite_fetch].data[prev_sprite_word_idx] <= MD_in; 
+      end
+
     end
   end  
-  logic [15:0] bat_ptr;
+
+
   //VRAM address control
   always_comb begin
     //assume we have dot width 00
@@ -723,6 +1351,21 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en,
         7: MA        = tile_ptr + 12'h8;//fetch CG1 (check the offset here)
       endcase
     end
+
+    else if (do_SATfetch) begin
+      case(char_cycle)
+        1: MA = SATB.data     + (4 * SATfetch_cur_entry);
+        3: MA = SATB.data + 1+ (4 * SATfetch_cur_entry);
+        5: MA = SATB.data + 2+ (4 * SATfetch_cur_entry);
+        7: MA = SATB.data + 3+ (4 * SATfetch_cur_entry);
+        default: MA = 0;
+      endcase
+    end
+
+    else if (do_Spritefetch) begin
+      MA = line_sprite_info[cur_sprite_fetch].base_addr + (16'd16 * sprite_word_idx);
+    end
+
     else MA = CPU_maddr;
   end
 
@@ -733,18 +1376,27 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en,
       cur_row <= 0; //TODO: actually handle this correctly
     end
     else if(clock_en) begin
+
       if(V_state == V_WAIT) cur_row <= 0; //latch to 0 right before drawing
+
+      // If we're just about to finish H_DISP mode, we should increment
+      // our cur_row value
       else if(H_state == H_DISP && H_cnt == 0 && char_cycle == 7) begin
         cur_row <= cur_row + 1; //TODO: need to initialize cur_row
       end
+
+      // If we're just about to finish HSYNC, set our bat_ptr
       else if(H_state == H_SYNC && H_cnt == 0 && char_cycle == 7) begin
         bat_ptr <= (x_tl_offset & x_mask) + 
                    ((((cur_row + y_start) >> 3) & y_mask) << y_shift);
       end
+
+      // If we're doing a BG fetch, increment the BAT for the next fetch
       else if(do_BGfetch) begin
         if(char_cycle == 7)
           bat_ptr <= bat_ptr + 1; //TODO: scrolling still broken
       end
+
     end
   end
 
@@ -757,14 +1409,27 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en,
       bg_rd_ptr  <= 0;
     end
     else if(clock_en) begin
+
+      // Increment our char_cycle on every clock
       char_cycle <= char_cycle + 1;
+
+
       if(in_vdw) begin
+
+        // If we are indeed on last char cycle and we're in a DISPLAY mode,
+        // we should increment bg_rd_ptr. Keep looping through the BG pipeline
         if(cycle_adjusted == 7) begin
           if(bg_rd_ptr == (BG_PIPE_LEN-1)) bg_rd_ptr <= 0;
           else bg_rd_ptr <= bg_rd_ptr + 1;
         end
+
       end
+
       else bg_rd_ptr <= 0; //TODO: jump to real start of line
+
+
+      // Loop through the pipeline for writes, increment at the end of
+      // every char cycle
       if(do_BGfetch) begin
         if(char_cycle == 7) begin
           if(bg_wr_ptr == (BG_PIPE_LEN-1)) bg_wr_ptr <= 0;

@@ -172,51 +172,6 @@ module vce_HuC6260( input logic clock, reset_N,
   end
 
 
-  
-  /*
-  // Output and next-state generator
-  always_comb begin
-    next_addr         = addr;
-    unique case (state)
-      IDLE: begin
-        if(~WR_n) next_state = WRITE;
-        else if(~RD_n) next_state = READ;
-        else next_state = IDLE;
-      end
-
-      READ: begin
-        if(A[0]) next_addr = addr + 1'b1;
-        next_state  = WAIT;
-      end
-
-      WRITE: begin
-        if(A[0]) next_addr = addr + 1'b1;
-        CRAM[addr] <= D;
-        next_state  = WAIT;
-      end
-
-      WAIT: begin
-        if(WR_n & RD_n) next_state = IDLE;
-        else next_state = WAIT;
-      end
-      
-    endcase
-  end
-
-  //should be on master clock
-  always_ff @(posedge clk, negedge reset_N) begin
-    if(~reset_N) begin
-      state <= IDLE;
-      addr <= 0;
-    end
-    else begin
-      state <= next_state;
-      addr <= next_addr;
-    end
-      
-  end
-   */
-  
 endmodule: vce_HuC6260;
 
 
