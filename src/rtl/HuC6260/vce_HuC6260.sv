@@ -117,7 +117,7 @@ module vce_HuC6260( input logic clock, reset_N,
 `ifdef FAKE_CRAM   //load CRAM image
       $readmemh("PAL.hex", FAKE_CRAM);
       for(int i = 0; i < 512; i++) begin
-        CRAM[i] <= FAKE_CRAM[i][8:0];
+        CRAM[i] = FAKE_CRAM[i][8:0];
       end
 `endif
     end
@@ -154,7 +154,7 @@ module vce_HuC6260( input logic clock, reset_N,
       VIDEO_G <= 0;
     end
     else if(clock_en)
-      if(^VD === 1'bx) begin //make TVEmu happy during reset
+      if(^VD === 1'bx) begin //make TVEmu happy before VRAM init
         VIDEO_B <= 0;
         VIDEO_R <= 0;
         VIDEO_G <= 0;

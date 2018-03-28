@@ -130,8 +130,8 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en,
 
   
   //assign y_shift = (MWR[6]) ? 6 : 5; //yet another hack
-  assign x_mask = (1 << 9) - 1;
-  assign y_mask = (1 << 9) - 1; //ditto
+  assign x_mask = (1 << y_shift) - 1;
+  assign y_mask = (1 << (MWR[6] + 8)) - 1; //ditto
   assign x_px_offset  = x_start[2:0];
   assign x_tl_offset  = x_start[9:3];
   assign y_px_offset  = y_start[2:0];
@@ -1004,7 +1004,6 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en,
   assign cycle_adjusted = char_cycle + x_px_offset;
 
 
-
   ///////////////////////////////////////////////////////////////////////////
   // SPRITE FETCH FSM
   ///////////////////////////////////////////////////////////////////////////
@@ -1128,6 +1127,8 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en,
 
       end
     end
+    else
+      VD[8]  = 1; //sprite palette 0, color 0 in overscan
   end
 
 
@@ -1216,11 +1217,14 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en,
     else MA = CPU_maddr;
   end
 
+
+  logic  [10:0] cur_col; //COL IN TILES, ROW IN PIXELS
+  assign bat_ptr = cur_col + ((((cur_row + y_start) & y_mask) >> 3) << y_shift);
   //BAT pointer management
   always_ff @(posedge clock, negedge reset_N) begin
     if(~reset_N) begin
-      bat_ptr <= 0;
       cur_row <= 0; //TODO: actually handle this correctly
+      cur_col <= 0;
     end
     else if(clock_en) begin
 
@@ -1234,14 +1238,13 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en,
 
       // If we're just about to finish HSYNC, set our bat_ptr
       else if(H_state == H_SYNC && H_cnt == 0 && char_cycle == 7) begin
-        bat_ptr <= (x_tl_offset & x_mask) + 
-                   ((((cur_row + y_start) >> 3) & y_mask) << y_shift);
+        cur_col <= x_tl_offset;
       end
 
       // If we're doing a BG fetch, increment the BAT for the next fetch
       else if(do_BGfetch) begin
         if(char_cycle == 7)
-          bat_ptr <= bat_ptr + 1; //TODO: scrolling still broken
+          cur_col <= (cur_col + 1) & x_mask;
       end
 
     end
