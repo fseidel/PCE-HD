@@ -225,12 +225,12 @@ module vdc_HuC6270(input logic clock, reset_N,
                           (V_state == V_DISP && V_cnt == 0 &&
                             (H_state == H_SYNC || (H_state == H_WAIT && H_cnt >= 2)));
 
-
+/*
   logic do_Pixelselect;
   assign do_Pixelselect = (H_state == H_WAIT && H_cnt == 0 && char_cycle >= 6) ||
                           (H_state == H_DISP && H_cnt != 0)                    ||
                           (H_state == H_DISP && H_cnt == 0 && char_cycle < 6);
-
+*/
 /*
   assign do_Spritefetch = ((H_state == H_SYNC) || (H_state == H_WAIT) || (H_state == H_END)) &&
                           (V_state == V_DISP) && 
@@ -715,24 +715,109 @@ module vdc_HuC6270(input logic clock, reset_N,
   logic [7:0] pix_idx;
   logic [4:0] num_valid_sprites;
 
-  // First stage of pipelne
-  logic       selected_valid_initial[4];
-  logic [3:0] selected_color_initial[4];
-  logic [3:0] selected_px_initial[4];
-  logic       selected_SPBG_initial[4];
-
-  logic sprite_horizontal_intersect[16];
-
-  // Second stage of pipeline
-  logic       selected_valid_final;
-  logic [3:0] selected_color_final;
-  logic [3:0] selected_px_final;
-  logic       selected_SPBG_final;
-
-
   logic [3:0] color_temp[16];
   logic [3:0] px_temp[16];
   logic       SPBG_temp[16];
+  logic sprite_present[16];
+
+  logic start_Pixelselect;
+  assign start_Pixelselect = (H_state == H_WAIT && H_cnt == 1 && char_cycle > 0) ||
+                             (H_state == H_WAIT && H_cnt == 0) ||
+                             (H_state == H_DISP && H_cnt > 1) ||
+                             (H_state == H_DISP && H_cnt == 1 && char_cycle == 0);
+
+  logic clear_Pixelselect;
+  assign clear_Pixelselect = (H_state == H_SYNC && H_cnt == 0 && char_cycle == 7);
+
+  logic do_Pixelselect[15];
+  logic [3:0] result_color[15];
+  logic [3:0] result_px[15];
+  logic result_SPBG[15];
+  logic result_present[15];
+
+  assign do_Pixelselect[0] = start_Pixelselect;
+
+  always_ff @(posedge clock, negedge reset_N) begin
+    if (~reset_N || clear_Pixelselect) begin
+      pix_idx <= 8'd0;
+      result_present[0] <= 1'b0;
+      num_valid_sprites <= line_sprite_idx;
+    end
+
+    else begin
+
+      // If it's time to start doing pixelselect, compare
+      // sprites 0 and 1;
+      if (do_Pixelselect[0]) begin
+
+        pix_idx <= pix_idx + 8'd1;
+
+        result_present[0] <= (sprite_present[0] || sprite_present[1]);
+
+        // Give priority to sprite 0 if it intersects
+        result_color[0]   <= (sprite_present[0]) ? color_temp[0] :
+                                                 color_temp[1];
+        result_px[0]      <= (sprite_present[0]) ? px_temp[0] :
+                                                   px_temp[1];
+        result_SPBG[0]    <= (sprite_present[0]) ? SPBG_temp[0] :
+                                                   SPBG_temp[1];
+
+      end
+
+    end
+  end
+
+  genvar j;
+  generate
+    for (j = 1; j < 15; j++) begin : gen_pixsel_reg
+
+      always_ff @(posedge clock, negedge reset_N) begin
+
+        if (~reset_N || clear_Pixelselect) begin
+          do_Pixelselect[j] <= 1'b0;
+          result_present[j] <= 1'b0;
+        end
+
+        else begin
+
+          // Always continue the pipeline enables
+          do_Pixelselect[j] <= do_Pixelselect[j - 1];
+
+          // Do the comparison if it's our pipeline step's turn
+          if (do_Pixelselect[j]) begin
+            
+            result_present[j] <= (result_present[j-1] || sprite_present[j+1]);
+
+            result_color[j]   <= (result_present[j-1]) ? result_color[j-1] :
+                                                         color_temp[j+1];
+            result_px[j]      <= (result_present[j-1]) ? result_px[j-1] :
+                                                         px_temp[j+1];
+
+            result_SPBG[j]    <= (result_present[j-1]) ? result_SPBG[j-1] :
+                                                         SPBG_temp[j+1];
+          end
+
+        end
+
+      end
+
+    end : gen_pixsel_reg
+
+  endgenerate
+
+
+
+  logic [7:0] local_pix_idx[16];
+  assign local_pix_idx[0] = pix_idx;
+  genvar k;
+  generate
+    for (k = 1; k < 16; k++) begin : gen_local_pix_idx
+      always_comb begin
+        local_pix_idx[k] = pix_idx - k + 1;
+      end
+    end : gen_local_pix_idx
+  endgenerate
+
 
   genvar i;
   generate
@@ -743,19 +828,15 @@ module vdc_HuC6270(input logic clock, reset_N,
         // Separate, fetching the correct temp value for each sprite.
         color_temp[i] = line_sprite_data[i].info.color;
         px_temp[i] = {
-          line_sprite_data[i].data[3][15 - (pix_idx - (line_sprite_data[i].info.x_pos - 32))],
-          line_sprite_data[i].data[2][15 - (pix_idx - (line_sprite_data[i].info.x_pos - 32))],
-          line_sprite_data[i].data[1][15 - (pix_idx - (line_sprite_data[i].info.x_pos - 32))],
-          line_sprite_data[i].data[0][15 - (pix_idx - (line_sprite_data[i].info.x_pos - 32))]
-//          line_sprite_data[i].data[3][15-(pix_idx%16)],
-//          line_sprite_data[i].data[2][15-(pix_idx%16)],
-//          line_sprite_data[i].data[1][15-(pix_idx%16)],
-//          line_sprite_data[i].data[0][15-(pix_idx%16)]
+          line_sprite_data[i].data[3][15 - (local_pix_idx[i] - (line_sprite_data[i].info.x_pos - 32))],
+          line_sprite_data[i].data[2][15 - (local_pix_idx[i] - (line_sprite_data[i].info.x_pos - 32))],
+          line_sprite_data[i].data[1][15 - (local_pix_idx[i] - (line_sprite_data[i].info.x_pos - 32))],
+          line_sprite_data[i].data[0][15 - (local_pix_idx[i] - (line_sprite_data[i].info.x_pos - 32))]
         };
-//        px_temp[i] = 4'hF;
+
         SPBG_temp[i] = line_sprite_data[i].info.SPBG;
 
-        sprite_horizontal_intersect[i] = 1'b0;
+        sprite_present[i] = 1'b0;
 
         // Only bother checking if this entry even is a valid sprite
         if (i < num_valid_sprites) begin
@@ -763,10 +844,10 @@ module vdc_HuC6270(input logic clock, reset_N,
           if (px_temp[i] != 0) begin
 
             // Check if this sprite collides with the current pix
-            if (line_sprite_data[i].info.x_pos - 32 <= pix_idx && 
-                pix_idx < line_sprite_data[i].info.x_pos - 32 + 16) begin
+            if (line_sprite_data[i].info.x_pos - 32 <= local_pix_idx[i] && 
+                local_pix_idx[i] < line_sprite_data[i].info.x_pos - 32 + 16) begin
 
-              sprite_horizontal_intersect[i] = 1'b1;
+              sprite_present[i] = 1'b1;
 
             end
 
@@ -778,338 +859,6 @@ module vdc_HuC6270(input logic clock, reset_N,
     end : gen_horiz_intersect
   endgenerate
 
-
-  logic [3:0] first_stage_chunk_present;
-
-  // Check 
-  always_comb begin
-
-    first_stage_chunk_present[0] = (sprite_horizontal_intersect[0] ||
-                                    sprite_horizontal_intersect[1] ||
-                                    sprite_horizontal_intersect[2] ||
-                                    sprite_horizontal_intersect[3]);
-
-    first_stage_chunk_present[1] = (sprite_horizontal_intersect[4] ||
-                                    sprite_horizontal_intersect[5] ||
-                                    sprite_horizontal_intersect[6] ||
-                                    sprite_horizontal_intersect[7]);                                    
-    first_stage_chunk_present[2] = (sprite_horizontal_intersect[8] ||
-                                    sprite_horizontal_intersect[9] ||
-                                    sprite_horizontal_intersect[10] ||
-                                    sprite_horizontal_intersect[11]);
-
-    first_stage_chunk_present[3] = (sprite_horizontal_intersect[12] ||
-                                    sprite_horizontal_intersect[13] ||
-                                    sprite_horizontal_intersect[14] ||
-                                    sprite_horizontal_intersect[15]);
-    
-
-  end
-
-  always_ff @(posedge clock, negedge reset_N) begin
-
-    if (~reset_N || 
-        (H_state == H_WAIT && H_cnt == 0 && char_cycle == 6)) begin
-      pix_idx = 8'd0;
-      num_valid_sprites <= line_sprite_idx;
-    end
-
-    else begin
-
-      if (do_Pixelselect) begin
-
-        pix_idx <= pix_idx + 8'd1;
-
-        // FIRST PIPELINE STAGE
-        selected_valid_initial[0] <= first_stage_chunk_present[0]; 
-        selected_valid_initial[1] <= first_stage_chunk_present[1]; 
-        selected_valid_initial[2] <= first_stage_chunk_present[2]; 
-        selected_valid_initial[3] <= first_stage_chunk_present[3]; 
-
-        if (first_stage_chunk_present[0]) begin
-
-          selected_color_initial[0] <= (sprite_horizontal_intersect[0]) ? color_temp[0] :
-                                       (sprite_horizontal_intersect[1]) ? color_temp[1] :
-                                       (sprite_horizontal_intersect[2]) ? color_temp[2] :
-                                                                          color_temp[3];
-
-
-          
-          selected_px_initial[0] <= (sprite_horizontal_intersect[0]) ? px_temp[0] :
-                                    (sprite_horizontal_intersect[1]) ? px_temp[1] :
-                                    (sprite_horizontal_intersect[2]) ? px_temp[2] :
-                                                                       px_temp[3];
-
-          selected_SPBG_initial[0] <= (sprite_horizontal_intersect[0]) ? SPBG_temp[0] :
-                                      (sprite_horizontal_intersect[1]) ? SPBG_temp[1] :
-                                      (sprite_horizontal_intersect[2]) ? SPBG_temp[2] :
-                                                                         SPBG_temp[3];
-
-        end
-
-        else if (first_stage_chunk_present[1]) begin
-
-          selected_color_initial[1] <= (sprite_horizontal_intersect[4]) ? color_temp[4] :
-                                       (sprite_horizontal_intersect[5]) ? color_temp[5] :
-                                       (sprite_horizontal_intersect[6]) ? color_temp[6] :
-                                                                          color_temp[7];
-
-          
-          selected_px_initial[1] <= (sprite_horizontal_intersect[4]) ? px_temp[4] :
-                                    (sprite_horizontal_intersect[5]) ? px_temp[5] :
-                                    (sprite_horizontal_intersect[6]) ? px_temp[6] :
-                                                                       px_temp[7];
-
-          selected_SPBG_initial[1] <= (sprite_horizontal_intersect[4]) ? SPBG_temp[4] :
-                                      (sprite_horizontal_intersect[5]) ? SPBG_temp[5] :
-                                      (sprite_horizontal_intersect[6]) ? SPBG_temp[6] :
-                                                                         SPBG_temp[7];
-
-        end
-
-        else if (first_stage_chunk_present[2]) begin
-
-          selected_color_initial[2] <= (sprite_horizontal_intersect[8])  ? color_temp[8] :
-                                       (sprite_horizontal_intersect[9])  ? color_temp[9] :
-                                       (sprite_horizontal_intersect[10]) ? color_temp[10] :
-                                                                           color_temp[11];
-
-          
-          selected_px_initial[2] <= (sprite_horizontal_intersect[8]) ? px_temp[8] :
-                                    (sprite_horizontal_intersect[9]) ? px_temp[9] :
-                                    (sprite_horizontal_intersect[10]) ? px_temp[10] :
-                                                                        px_temp[11];
-
-          selected_SPBG_initial[2] <= (sprite_horizontal_intersect[8]) ? SPBG_temp[8] :
-                                      (sprite_horizontal_intersect[9]) ? SPBG_temp[9] :
-                                      (sprite_horizontal_intersect[10]) ? SPBG_temp[10] :
-                                                                          SPBG_temp[11];
-
-        end
-
-        else if (first_stage_chunk_present[3]) begin
-
-          selected_color_initial[3] <= (sprite_horizontal_intersect[12]) ? color_temp[12] :
-                                       (sprite_horizontal_intersect[13]) ? color_temp[13] :
-                                       (sprite_horizontal_intersect[14]) ? color_temp[14] :
-                                                                           color_temp[15];
-
-          
-          selected_px_initial[3] <= (sprite_horizontal_intersect[12]) ? px_temp[12] :
-                                    (sprite_horizontal_intersect[13]) ? px_temp[13] :
-                                    (sprite_horizontal_intersect[14]) ? px_temp[14] :
-                                                                        px_temp[15];
-
-          selected_SPBG_initial[3] <= (sprite_horizontal_intersect[12]) ? SPBG_temp[12] :
-                                      (sprite_horizontal_intersect[13]) ? SPBG_temp[13] :
-                                      (sprite_horizontal_intersect[14]) ? SPBG_temp[14] :
-                                                                          SPBG_temp[15];
-
-        end
-
-
-        // SECOND PIPELINE STAGE
-        selected_valid_final <= (selected_valid_initial[3] || 
-                                selected_valid_initial[2] ||
-                                selected_valid_initial[1] ||
-                                selected_valid_initial[0]);
-
-        if (selected_valid_initial[0]) begin
-
-          selected_color_final <= selected_color_initial[0];
-          selected_px_final <= selected_px_initial[0];
-          selected_SPBG_final <= selected_SPBG_initial[0];
-
-        end
-
-        else if (selected_valid_initial[1]) begin
-
-          selected_color_final <= selected_color_initial[1];
-          selected_px_final <= selected_px_initial[1];
-          selected_SPBG_final <= selected_SPBG_initial[1];
-
-        end
-
-        else if (selected_valid_initial[2]) begin
-
-          selected_color_final <= selected_color_initial[2];
-          selected_px_final <= selected_px_initial[2];
-          selected_SPBG_final <= selected_SPBG_initial[2];
-
-        end
-
-        else if (selected_valid_initial[3]) begin
-
-          selected_color_final <= selected_color_initial[3];
-          selected_px_final <= selected_px_initial[3];
-          selected_SPBG_final <= selected_SPBG_initial[3];
-
-        end
-
-      end
-
-    end
-
-  end
-
-// OLD LINE ARRANGE FSM, WRONG
-/*
-  logic [3:0] sprite_arrange_idx;
-  logic [4:0] disp_cycle_sprite_idx[16];
-
-  always_ff @(posedge clock, negedge reset_N) begin
-
-    if (~reset_N || 
-        (H_state == H_WAIT && H_cnt == 2)) begin
-      sprite_arrange_idx <= 0;
-      disp_cycle_sprite_idx[0] <= 5'd0;
-      disp_cycle_sprite_idx[1] <= 5'd0;
-      disp_cycle_sprite_idx[2] <= 5'd0;
-      disp_cycle_sprite_idx[3] <= 5'd0;
-      disp_cycle_sprite_idx[4] <= 5'd0;
-      disp_cycle_sprite_idx[5] <= 5'd0;
-      disp_cycle_sprite_idx[6] <= 5'd0;
-      disp_cycle_sprite_idx[7] <= 5'd0;
-      disp_cycle_sprite_idx[8] <= 5'd0;
-      disp_cycle_sprite_idx[9] <= 5'd0;
-      disp_cycle_sprite_idx[10] <= 5'd0;
-      disp_cycle_sprite_idx[11] <= 5'd0;
-      disp_cycle_sprite_idx[12] <= 5'd0;
-      disp_cycle_sprite_idx[13] <= 5'd0;
-      disp_cycle_sprite_idx[14] <= 5'd0;
-      disp_cycle_sprite_idx[15] <= 5'd0;
-    end
-
-    else begin
-
-      if (do_Linearrange) begin
-
-        // If the sprite idx we're on is within the bounds of the
-        // number of sprites on the lines
-        if (sprite_arrange_idx < line_sprite_idx) begin
-
-          disp_cycle_sprite_idx[(line_sprite_data[sprite_arrange_idx].info.x_pos-32)/16][4] <= 1'b1;
-          disp_cycle_sprite_idx[(line_sprite_data[sprite_arrange_idx].info.x_pos-32)/16][3:0] <= sprite_arrange_idx;
-
-        end
-
-        sprite_arrange_idx <= sprite_arrange_idx + 4'd1;
-
-      end
-
-    end
-
-  end
-*/
-  // Stuff from FORD
-  /* 
-
-  logic [7:0] sat_count, total_count;
-
-  satb_entry_t cur_entry;
-  sat_entry_t  line_sat_entries[16];
-  logic second_half;
-  assign cur_entry = satb_entries[sat_count];
-  logic [5:0] cur_height, cur_width;
-  assign cur_height = (cur_entry.CGY == HEIGHT_16) ?  6'd16 :
-                      (cur_entry.CGY == HEIGHT_32) ?  6'd32 : 
-                                                      6'd64;
-
-  assign cur_width = (cur_entry.CGX == WIDTH_16) ? 6'd16 :
-                                                   6'd32;
-
-  logic [9:0] cur_x_pos, cur_y_pos;
-  assign cur_x_pos = cur_entry.x_pos[9:0];
-  assign cur_y_pos = cur_entry.y_pos[9:0];
-
-  logic [9:0] next_line;
-  assign next_line = y_idx + 10'd64 + 10'd1;
-
-  logic [15:0] temp_y;
-  logic [15:0] corrected_ptr;
-  always_comb begin
-
-    corrected_ptr = cur_entry.addr;
-
-    if (cur_entry.CGX != WIDTH_16) begin
-      corrected_ptr[0] = second_half ^ cur_entry.x_invert;
-    end
-
-    temp_y = next_line - cur_y_pos;
-    
-    unique case (cur_entry.CGY)
-
-      HEIGHT_16: begin
-        
-      end
-
-      HEIGHT_32: begin
-        corrected_ptr[1] = (temp_y[4] ^ cur_entry.y_invert);
-      end
-
-      HEIGHT_64: begin
-
-        corrected_ptr[2:1] = (temp_y[5:4] ^ {cur_entry.y_invert, cur_entry.y_invert});
-
-      end
-
-    endcase
-
-  end
-
-  always_ff @(posedge clock, negedge reset_n) begin
-
-    if (~reset_N) begin
-      sat_count <= 8'd0;
-      total_count <= 8'd0;
-      second_half <= 1'b0;
-    end
-
-    else begin
-
-      if (V_state == VDW) begin
-        if (total_count < 8'd16 && sat_count < 8'd64) begin
-
-          // For non y-invert
-          if (cur_y_pos <= next_line && 
-              cur_y_pos + cur_height > next_line) begin
-
-            // First copy the whole entry
-            line_sat_entries[sat_count] <= cur_entry;
-            line_sat_entries[sat_count].addr <= corrected_ptr;
-            total_count <= total_count + 8'd1;
-
-            // If normal width sprite:
-            if (cur_entry.CGX == WIDTH_16) begin
-              sat_count <= sat_count + 8'd1;
-              
-            end
-
-            // If double wide:
-            else begin
-
-              if (~second_half) begin
-                line_sat_entries[sat_count].CGX 
-                second_half <= 1'b1;
-              end 
-
-              else begin
-                second_half <= 1'b0;
-                sat_count <= sat_count + 8'd1;
-              end
-            end
-
-          end 
-
-
-        end
-      end
-
-    end
-
-  end
-
-*/
 
 
   localparam BG_PIPE_LEN = 3; //we always write 2 ahead of our read
@@ -1165,7 +914,6 @@ module vdc_HuC6270(input logic clock, reset_N,
       prev_sprite_word_idx <= sprite_word_idx;
 
       if (do_Spritefetch) begin
-//        $display("%d %d, base_addr:%x, MA:%x y_idx:%d", cur_sprite_fetch, sprite_word_idx, line_sprite_info[cur_sprite_fetch].base_addr, MA, y_idx);
         // Copy over the info
         if (sprite_word_idx == 2'd0) begin
           line_sprite_data[cur_sprite_fetch].info <= line_sprite_info[cur_sprite_fetch];
@@ -1195,20 +943,29 @@ module vdc_HuC6270(input logic clock, reset_N,
                   output_tile.CG0[15 - cycle_adjusted],
                   output_tile.CG0[7 - cycle_adjusted]};
 
+  logic sprite_pixel_present;
+  logic [3:0] sprite_pixel_color;
+  logic [3:0] sprite_pixel_px;
+  logic sprite_pixel_SPBG;
+
+  assign sprite_pixel_present = result_present[14];
+  assign sprite_pixel_color   = result_color[14];
+  assign sprite_pixel_px      = result_px[14];
+  assign sprite_pixel_SPBG    = result_SPBG[14]; 
 
   always_comb begin
     VD = 0;
     if(in_vdw) begin //TODO: make this work correctly with new VSYNC
 
-      if (selected_valid_final) begin
+      if (sprite_pixel_present) begin
 
-        if (~selected_SPBG_final) begin
+        if (~sprite_pixel_SPBG) begin
           // If it's a background pixel and the BG pixel is the 0
           // pixel, then draw the sprite
           if (tile_pix == 0) begin 
             VD[8] = 1;
-            VD[7:4] = selected_color_final;
-            VD[3:0] = selected_px_final;
+            VD[7:4] = sprite_pixel_color;
+            VD[3:0] = sprite_pixel_px;;
           end
 
           // If the BG pixel is NOT 0 (i.e. in front of the sprite)
@@ -1224,8 +981,8 @@ module vdc_HuC6270(input logic clock, reset_N,
         else begin
 
           VD[8] = 1;
-          VD[7:4] = selected_color_final;
-          VD[3:0] = selected_px_final;
+          VD[7:4] = sprite_pixel_color;
+          VD[3:0] = sprite_pixel_px;
 
         end
 
