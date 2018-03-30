@@ -705,8 +705,6 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en,
       satb_idx        <= 7'd0;
       line_sprite_idx <= 5'd0;
       second_half     <= 1'd0;
-      for(int i = 0; i < 16; i++)
-        line_sprite_info[i] <= 0;
     end
 
     else if ((H_state == H_WAIT && H_cnt == 0 && char_cycle == 7) 
@@ -714,8 +712,6 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en,
       satb_idx        <= 7'd0;
       line_sprite_idx <= 5'd0;
       second_half     <= 1'd0;
-      for(int i = 0; i < 16; i++)
-        line_sprite_info[i] <= 0;
     end
 
     else if (clock_en) begin
