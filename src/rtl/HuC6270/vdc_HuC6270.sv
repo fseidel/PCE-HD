@@ -451,15 +451,20 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en,
 
   // Sprite Crawl
   logic do_Spritecrawl;
-  assign do_Spritecrawl = (V_state == V_WAIT && V_cnt == 0 && H_state == H_DISP) ||
-                          (V_state == V_DISP && V_cnt != 0 && H_state == H_DISP);
+  assign do_Spritecrawl = (V_state == V_WAIT && V_cnt == 0 &&
+                           H_state == H_DISP) ||
+                          (V_state == V_DISP && V_cnt != 0 
+                           && H_state == H_DISP);
 
   logic do_Spritefetch;
-  assign do_Spritefetch = (V_state == V_WAIT && V_cnt == 0 && H_state == H_END) ||
-                          (V_state == V_DISP && V_cnt != 0 &&
-                            (H_state == H_SYNC || (H_state == H_WAIT && H_cnt >= 2) || H_state == H_END)) ||
+  assign do_Spritefetch = (V_state == V_WAIT && V_cnt == 0 && H_state == H_END) 
+                          || (V_state == V_DISP && V_cnt != 0 &&
+                              (H_state == H_SYNC ||
+                               (H_state == H_WAIT && H_cnt  >= 2) ||
+                               H_state == H_END)) ||
                           (V_state == V_DISP && V_cnt == 0 &&
-                            (H_state == H_SYNC || (H_state == H_WAIT && H_cnt >= 2)));
+                           (H_state == H_SYNC ||
+                            (H_state == H_WAIT && H_cnt >= 2)));
 
 
 
@@ -657,24 +662,34 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en,
   logic [15:0] sprite_base_addr;
   logic [9:0] temp_y;
   logic [6:0] sprite_y_mask;
-  assign sprite_y_mask  = (cur_entry.CGY == HEIGHT_16) ? 6'hF :
+  logic [15:0] corrected_sprite_addr;
+  assign sprite_y_mask  = (cur_entry.CGY == HEIGHT_16) ? 6'h0F :
                           (cur_entry.CGY == HEIGHT_32) ? 6'h1F :
                                                          6'h3F;
   
+  //assign temp_y = next_line - cur_top;
   assign temp_y = ((next_line - cur_top) ^ {10{cur_entry.y_invert}}) 
                   & sprite_y_mask;
 
   // Logic to determine sprite_base_addr
   always_comb begin
-
-    if (~(second_half ^ cur_entry.x_invert)) begin
-      sprite_base_addr = (cur_entry.addr << 5) +
+    corrected_sprite_addr  = cur_entry.addr;
+    if(cur_entry.CGX == WIDTH_32)
+      corrected_sprite_addr[0]  = 0;
+    if(cur_entry.CGY != HEIGHT_16) begin
+      corrected_sprite_addr[1]  = 0;
+      if(cur_entry.CGY != HEIGHT_32)
+        corrected_sprite_addr[2] = 0;
+    end
+    
+    if (~(second_half ^ cur_entry.x_invert && cur_entry.CGX == WIDTH_32)) begin
+      sprite_base_addr = (corrected_sprite_addr << 5) +
                          (temp_y & 4'hF) +
                          ((temp_y >> 4) << 7);
     end
 
     else begin
-      sprite_base_addr = (cur_entry.addr << 5) +
+      sprite_base_addr = (corrected_sprite_addr << 5) +
                          (temp_y & 4'hF) +
                          ((temp_y >> 4) << 7) +
                          (64); // Add extra 64 to get to second half
@@ -687,37 +702,41 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en,
     // When to reset OR clear to prep for next cycle,
     // which is when we're about to start H_DISP
     if (~reset_N) begin
-      satb_idx <= 7'd0;
+      satb_idx        <= 7'd0;
       line_sprite_idx <= 5'd0;
-      second_half <= 1'd0;
+      second_half     <= 1'd0;
+      for(int i = 0; i < 16; i++)
+        line_sprite_info[i] <= 0;
     end
 
-    else if ((H_state == H_WAIT && H_cnt == 0 && char_cycle == 7) && clock_en) begin
-      satb_idx <= 7'd0;
+    else if ((H_state == H_WAIT && H_cnt == 0 && char_cycle == 7) 
+             && clock_en) begin
+      satb_idx        <= 7'd0;
       line_sprite_idx <= 5'd0;
-      second_half <= 1'd0;
+      second_half     <= 1'd0;
+      for(int i = 0; i < 16; i++)
+        line_sprite_info[i] <= 0;
     end
 
     else if (clock_en) begin
 
       if (do_Spritecrawl) begin
-
         // Check if there is space for more sprites or if 
         // we've already checked all of the sprites
         if (line_sprite_idx < 5'd16 && satb_idx < 7'd64) begin
-
-
+          line_sprite_info[line_sprite_idx].x_pos <= cur_entry.x_pos[9:0];
+          line_sprite_info[line_sprite_idx].x_invert <= cur_entry.x_invert;
+          line_sprite_info[line_sprite_idx].y_invert <= cur_entry.y_invert;
+          line_sprite_info[line_sprite_idx].SPBG <= cur_entry.SPBG;
+          line_sprite_info[line_sprite_idx].base_addr <= sprite_base_addr;
+          line_sprite_info[line_sprite_idx].color <= cur_entry.color;
+          
           if (second_half) begin
 
             // If we're on the second_half of a sprite, 
             // assume double-wide and copy the data over.
-            line_sprite_info[line_sprite_idx].x_pos <= cur_entry.x_pos[9:0] + 10'd16;
-            line_sprite_info[line_sprite_idx].x_invert <= cur_entry.x_invert;
-            line_sprite_info[line_sprite_idx].y_invert <= cur_entry.y_invert;
-            line_sprite_info[line_sprite_idx].SPBG <= cur_entry.SPBG;
-            line_sprite_info[line_sprite_idx].base_addr <= sprite_base_addr;
-            line_sprite_info[line_sprite_idx].color <= cur_entry.color;
-
+            line_sprite_info[line_sprite_idx].x_pos <= cur_entry.x_pos[9:0] + 
+                                                       10'd16;
             // Disable second_half
             second_half <= 1'd0;
 
@@ -731,42 +750,18 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en,
 
           // Check if the next line happens to intersect with this sprite
           else if (sprite_vertical_intersect) begin
-
-
-
-            // Save the Sprite information
             if (cur_entry.CGX == WIDTH_16) begin
-
-              line_sprite_info[line_sprite_idx].x_pos <= cur_entry.x_pos[9:0];
-              line_sprite_info[line_sprite_idx].x_invert <= cur_entry.x_invert;
-              line_sprite_info[line_sprite_idx].y_invert <= cur_entry.y_invert;
-              line_sprite_info[line_sprite_idx].SPBG <= cur_entry.SPBG;
-              line_sprite_info[line_sprite_idx].base_addr <= sprite_base_addr;          
-              line_sprite_info[line_sprite_idx].color <= cur_entry.color;
-
               // Move onto the next entry
               line_sprite_idx <= line_sprite_idx + 5'd1;
-
               // Move onto the next sprite
               satb_idx <= satb_idx + 7'd1;
-
-            end // if (cur_entry.CGX == WIDTH_16)
+            end
 
             else begin
-
-              line_sprite_info[line_sprite_idx].x_pos <= cur_entry.x_pos[9:0];
-              line_sprite_info[line_sprite_idx].x_invert <= cur_entry.x_invert;
-              line_sprite_info[line_sprite_idx].y_invert <= cur_entry.y_invert;
-              line_sprite_info[line_sprite_idx].SPBG <= cur_entry.SPBG;
-              line_sprite_info[line_sprite_idx].base_addr <= sprite_base_addr;          
-              line_sprite_info[line_sprite_idx].color <= cur_entry.color;
-
               // Do NOT move onto the next sprite, but enable second_half
               second_half <= 1'd1;
-
               // Move onto the next entry
               line_sprite_idx <= line_sprite_idx + 1'd1;
-
             end // else
 
           end // if (sprite_vertical_intersect) 
@@ -780,11 +775,11 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en,
         end // if (line_sprite < 5'd16 && satb_idx < 7'd64) 
 
       end // if (do_Spritecrawl) 
+      
 
-
-    end // else 
-
-  end
+    end // if (clock_en)
+   
+  end // always_ff @ (posedge clock, negedge reset_N)
 
 
   /////////////////////////////////////////////////////
@@ -800,13 +795,16 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en,
   logic sprite_present[16];
 
   logic start_Pixelselect;
-  assign start_Pixelselect = (H_state == H_WAIT && H_cnt == 1 && char_cycle > 0) ||
+  assign start_Pixelselect = (H_state == H_WAIT && H_cnt == 1 &&
+                              char_cycle > 0) ||
                              (H_state == H_WAIT && H_cnt == 0) ||
                              (H_state == H_DISP && H_cnt > 1) ||
-                             (H_state == H_DISP && H_cnt == 1 && char_cycle == 0);
+                             (H_state == H_DISP && H_cnt == 1 &&
+                              char_cycle == 0);
 
   logic clear_Pixelselect;
-  assign clear_Pixelselect = (H_state == H_SYNC && H_cnt == 0 && char_cycle == 7);
+  assign clear_Pixelselect = (H_state == H_SYNC && H_cnt == 0 &&
+                              char_cycle == 7);
 
   logic do_Pixelselect[15];
   logic [3:0] result_color[15];
@@ -942,7 +940,8 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en,
 
             // Check if this sprite collides with the current pix
             if (line_sprite_data[i].info.x_pos - 32 <= local_pix_idx[i] && 
-                local_pix_idx[i] < line_sprite_data[i].info.x_pos - 32 + 16) begin
+                local_pix_idx[i] < line_sprite_data[i].info.x_pos - 32 + 16) 
+              begin
 
               sprite_present[i] = 1'b1;
 
@@ -1058,10 +1057,10 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en,
       if (do_Spritefetch) begin
         // Copy over the info
         if (sprite_word_idx == 2'd0) begin
-          line_sprite_data[cur_sprite_fetch].info <= line_sprite_info[cur_sprite_fetch];
+          line_sprite_data[cur_sprite_fetch].info <= 
+                                           line_sprite_info[cur_sprite_fetch];
         end // if (sprite_word_idx == 2'd0)
-
-
+        
         if (sprite_word_idx == 2'd3) begin
           cur_sprite_fetch <= cur_sprite_fetch + 4'd1;
           sprite_word_idx <= 2'd0;
@@ -1081,9 +1080,9 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en,
 
   logic [3:0] tile_pix;
   assign tile_pix = {output_tile.CG1[15 - cycle_adjusted],
-                  output_tile.CG1[7 - cycle_adjusted], 
-                  output_tile.CG0[15 - cycle_adjusted],
-                  output_tile.CG0[7 - cycle_adjusted]};
+                     output_tile.CG1[7 - cycle_adjusted], 
+                     output_tile.CG0[15 - cycle_adjusted],
+                     output_tile.CG0[7 - cycle_adjusted]};
 
   logic sprite_pixel_present;
   logic [3:0] sprite_pixel_color;
@@ -1094,7 +1093,7 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en,
   assign sprite_pixel_color   = result_color[14];
   assign sprite_pixel_px      = result_px[14];
   assign sprite_pixel_SPBG    = result_SPBG[14]; 
-
+  
   always_comb begin
     VD = 0;
     if(in_vdw) begin //TODO: make this work correctly with new VSYNC
@@ -1224,16 +1223,16 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en,
 
     else if (do_SATfetch) begin
       case(char_cycle)
-        1: MA = SATB.data     + (4 * SATfetch_cur_entry);
-        3: MA = SATB.data + 1+ (4 * SATfetch_cur_entry);
-        5: MA = SATB.data + 2+ (4 * SATfetch_cur_entry);
-        7: MA = SATB.data + 3+ (4 * SATfetch_cur_entry);
+        1: MA = SATB.data + 0 + (SATfetch_cur_entry << 2);
+        3: MA = SATB.data + 1 + (SATfetch_cur_entry << 2);
+        5: MA = SATB.data + 2 + (SATfetch_cur_entry << 2);
+        7: MA = SATB.data + 3 + (SATfetch_cur_entry << 2);
         default: MA = 0;
       endcase
     end
 
     else if (do_Spritefetch) begin
-      MA = line_sprite_info[cur_sprite_fetch].base_addr + (16'd16 * sprite_word_idx);
+      MA = line_sprite_info[cur_sprite_fetch].base_addr + (sprite_word_idx<<4);
     end
 
     else MA = CPU_maddr;
