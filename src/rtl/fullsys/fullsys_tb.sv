@@ -24,7 +24,7 @@ module fullsys_tb;
   assign reset  = ~reset_N;
   
   wire [20:0] AB_21;
-  wire [7:0]  DI, DO, EXT_out;
+  wire [7:0]  DO, EXT_out;
   wire        RE, WE, IRQ1_n, IRQ2_n, NMI, HSM, RDY_n,
               CE_n, CER_n, CE7_n, CEK_n;
 
@@ -34,8 +34,8 @@ module fullsys_tb;
   assign RD_n  = ~RE;
   assign WR_n  = ~WE;
  
-  //assign RDY_n = ~BUSY_n;
-  assign RDY_n = 1'b1;
+  assign RDY_n = ~BUSY_n;
+  //assign RDY_n = 1'b1;
   
 
   assign IRQ2_n = 1'b1;
@@ -47,9 +47,14 @@ module fullsys_tb;
 
   
   cpu_HuC6280 CPU(.*);
-  memory mem(.clk, .re(RE), .we(WE), .addr(AB_21), .dIn(DO), .dOut(DI),
+  /*
+  memory mem(.clk, .re(RE), .we(WE), .addr(AB_21), .dIn(DO), .dOut(IO_data),
              .CE_n, .CER_n);
-
+   */
+  logic [19:0] SRAM_ADDR;
+  logic [15:0] SRAM_DQ;
+  ROM rom(.addr(AB_21[19:0]), .D(IO_data), .RD_n(RD_n), .CE_n(CE_n),
+	  .SRAM_ADDR(SRAM_ADDR), .SRAM_DQ(SRAM_DQ));
   
     
   vdc_HuC6270 vdc(.clock(clock), .reset_N(reset_N), .clock_en(clock_en),
@@ -89,7 +94,7 @@ module fullsys_tb;
     reset_N      = 1'b0;
     #100 reset_N <= 1'b1;
     do_write    <= 1'b1;
-    while(frame_count < 3) #10 continue; //352
+    while(frame_count < 600) #10 continue; //352
     //while(VIDEO_R == 0 && VIDEO_G == 0 && VIDEO_B == 0) #10 continue;
       //force vdc.BXR  = 4*frame_count;
       //force vdc.BYR  = 4*frame_count;
@@ -103,7 +108,7 @@ module fullsys_tb;
     if(pclog_enabled) begin
       $fclose(pclog);
     end
-    $strobe("A: %x, X: %x, Y: %x", CPU.A, CPU.X, CPU.Y);
+    //$strobe("A: %x, X: %x, Y: %x", CPU.A, CPU.X, CPU.Y);
     #1 $finish;
   end
   
@@ -120,7 +125,7 @@ module fullsys_tb;
         frame_count++;
         $display("frame %d", frame_count);
       end
-      if(log_enabled && do_write && clock_en && (frame_count >= 0)) //500
+      if(log_enabled && do_write && clock_en && (frame_count >= 500)) //500
         $fwrite(f, "%3d %3d %3d %b %b\n", R, G, B, HSYNC_n, VSYNC_n);
     end
   end

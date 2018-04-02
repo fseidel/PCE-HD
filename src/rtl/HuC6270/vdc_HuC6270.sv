@@ -1,5 +1,5 @@
 `default_nettype none
-`include "VDCDefines.vh"
+`include "./VDCDefines.vh"
 
 /*
  * verilog model of HuC6270 VDC
@@ -140,8 +140,14 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en,
 
   logic [15:0] MAWR, MARR;
   logic [9:0]  RCR;
-  logic [12:0]  CR;
+  CR_t  CR;
 
+  logic [7:0]  addr_incr;
+  assign addr_incr  = (CR.addr_incr == ADDR_INCR_1)   ? 8'd01 :
+                      (CR.addr_incr == ADDR_INCR_32)  ? 8'd32 :
+                      (CR.addr_incr == ADDR_INCR_64)  ? 8'd64 :
+                                                        8'd128;
+  
   //high when CPU is issuing a read or write request
   logic VRAM_read_req;
   logic VRAM_write_req;
@@ -177,6 +183,31 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en,
   end
   
 
+
+  reg_sel_t D_regsel;
+  always_comb begin
+    D_regsel  = REG_MAWR;
+    case(D[4:0])
+      5'd0:  D_regsel = REG_MAWR;
+      5'd1:  D_regsel = REG_MARR;
+      5'd2:  D_regsel = REG_VRR_VWR;
+      5'd5:  D_regsel = REG_CR;
+      5'd6:  D_regsel = REG_RCR;
+      5'd7:  D_regsel = REG_BXR;
+      5'd8:  D_regsel = REG_BYR;
+      5'd9:  D_regsel = REG_MWR;
+      5'd10:  D_regsel = REG_HSR;
+      5'd11:  D_regsel = REG_HDR;
+      5'd12:  D_regsel = REG_VSR;
+      5'd13:  D_regsel = REG_VDR;
+      5'd14:  D_regsel = REG_VCR;
+      5'd15:  D_regsel = REG_DCR;
+      5'd16:  D_regsel = REG_SOUR;
+      5'd17:  D_regsel = REG_DESR;
+      5'd18:  D_regsel = REG_LENR;
+      5'd19:  D_regsel = REG_SATB;
+    endcase
+  end
   
   logic vram_write_pending;
   logic MARR_increment;
@@ -184,7 +215,7 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en,
   logic [15:0] CPU_write_buf;
   always_ff @(posedge clock, negedge reset_N) begin
     if(~reset_N) begin
-      VDC_regnum         <= 0; //makes BUSY_n behave on reset
+      VDC_regnum         <= REG_MAWR; //makes BUSY_n behave on reset
       vram_write_pending <= 0;
       RCR                <= 0;
       CR                 <= 0;
@@ -197,15 +228,15 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en,
     else begin
       if(clock_en) begin
         if(CPU_read_issue) begin
-          MARR <= MARR + 1;
+          MARR <= MARR + addr_incr;
         end
         if(CPU_write_issue) begin
-          MAWR <= MAWR + 1;
+          MAWR <= MAWR + addr_incr;
         end
         if(WR & ~prev_WR)
           case(A)
             A_STATUS_ADDR_REG:
-              VDC_regnum <= D[4:0];
+              VDC_regnum <= D_regsel;
             A_DATA_LSB:
               case(VDC_regnum)
                 REG_MAWR:
@@ -445,7 +476,7 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en,
                       (V_state == V_DISP);
 
   // SAT Fetch
-  satb_entry_t satb_entries[num_sprites];
+  logic [63:0]  satb_entries[num_sprites];
   logic [$clog2(num_sprites) - 1 : 0] SATfetch_cur_entry;
 
 
@@ -644,7 +675,12 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en,
 
   logic [9:0] next_line, cur_top, cur_bot;
 
+  // Logic to VCE telling it if we're currently in active display 
+  logic        in_vdw; 
+  assign in_vdw = (H_state == H_DISP && V_state == H_DISP);
+
   // Look at the next line (plus a 64 line offset as per spec)
+  //assign next_line = (in_vdw) ? y_idx + 10'd64 + 10'd1 : 10'd64;
   assign next_line = y_idx + 10'd64 + 10'd1;
   assign cur_top = cur_entry.y_pos[9:0];
   assign cur_bot = (cur_entry.CGY == HEIGHT_16) ? cur_top + 10'd16 :
@@ -902,30 +938,31 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en,
     end : gen_local_pix_idx
   endgenerate
 
-
+  line_sprite_data_t line_sprite_data[16];
+  
   genvar i;
   generate
     for (i = 0; i < 16; i++) begin : gen_horiz_intersect
+      line_sprite_data_t cur_line_sprite_data;
       always_comb begin
-
-
+	    cur_line_sprite_data = line_sprite_data[i];
         // Separate, fetching the correct temp value for each sprite.
-        color_temp[i] = line_sprite_data[i].info.color;
+        color_temp[i] = cur_line_sprite_data.info.color;
         px_temp[i] = {
-          line_sprite_data[i].data[3][15 - (local_pix_idx[i] - 
-          (line_sprite_data[i].info.x_pos - 32))],
+          cur_line_sprite_data.data[3][15 - (local_pix_idx[i] - 
+          (cur_line_sprite_data.info.x_pos - 32))],
                       
-          line_sprite_data[i].data[2][15 - (local_pix_idx[i] - 
-          (line_sprite_data[i].info.x_pos - 32))],
+          cur_line_sprite_data.data[2][15 - (local_pix_idx[i] - 
+          (cur_line_sprite_data.info.x_pos - 32))],
                       
-          line_sprite_data[i].data[1][15 - (local_pix_idx[i] - 
-          (line_sprite_data[i].info.x_pos - 32))],
+          cur_line_sprite_data.data[1][15 - (local_pix_idx[i] - 
+          (cur_line_sprite_data.info.x_pos - 32))],
                       
-          line_sprite_data[i].data[0][15 - (local_pix_idx[i] - 
-          (line_sprite_data[i].info.x_pos - 32))]
+          cur_line_sprite_data.data[0][15 - (local_pix_idx[i] - 
+          (cur_line_sprite_data.info.x_pos - 32))]
         };
 
-        SPBG_temp[i] = line_sprite_data[i].info.SPBG;
+        SPBG_temp[i] = cur_line_sprite_data.info.SPBG;
 
         sprite_present[i] = 1'b0;
 
@@ -935,8 +972,8 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en,
           if (px_temp[i] != 0) begin
 
             // Check if this sprite collides with the current pix
-            if (line_sprite_data[i].info.x_pos - 32 <= local_pix_idx[i] && 
-                local_pix_idx[i] < line_sprite_data[i].info.x_pos - 32 + 16) 
+            if (cur_line_sprite_data.info.x_pos - 32 <= local_pix_idx[i] && 
+                local_pix_idx[i] < cur_line_sprite_data.info.x_pos - 32 + 16) 
               begin
 
               sprite_present[i] = 1'b1;
@@ -961,12 +998,6 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en,
   
   assign output_tile = tile_pipe[bg_rd_ptr];
  
-
-
-
-  // Logic to VCE telling it if we're currently in active display 
-  logic        in_vdw; 
-  assign in_vdw = (H_state == H_DISP && V_state == H_DISP);
 
   /*
    * Interrupts
@@ -1023,9 +1054,7 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en,
   logic [1:0] sprite_word_idx, prev_sprite_word_idx;
 
   logic first_Spritefetch_cycle;
-
-  line_sprite_data_t line_sprite_data[16];
-
+  
   always_ff @(posedge clock, negedge reset_N) begin
 
     if (~reset_N) begin
@@ -1073,6 +1102,12 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en,
 
   end // always_ff
 
+
+/*
+  always @(posedge (H_state == H_DISP)) begin
+    $display("%x, %x", next_line, num_valid_sprites);
+  end
+ */
 
   logic [3:0] tile_pix;
   assign tile_pix = {output_tile.CG1[15 - cycle_adjusted],
@@ -1204,6 +1239,7 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en,
 
   //VRAM address control
   always_comb begin
+    MA = 0;
     //assume we have dot width 00
     if(do_BGfetch) begin
       case(char_cycle)
@@ -1306,4 +1342,4 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en,
       else bg_wr_ptr <= 0; //first write is garbage
     end
   end
-endmodule : vdc_HuC6270;
+endmodule : vdc_HuC6270

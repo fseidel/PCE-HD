@@ -6,10 +6,6 @@
  * (C) 2018 Ford Seidel and Amolak Nagi
  */
 
-
-`define SIMULATION
-`define FAKE_CRAM
-
 module vce_HuC6260( input logic clock, reset_N,
 
                     // From VDC
@@ -46,18 +42,7 @@ module vce_HuC6260( input logic clock, reset_N,
   logic [8:0]   CTA; //color table address register ($402)
   logic [7:0]   CTW; //color table write, INTENTIONALLY 8-bits wide
   logic [8:0]   CTR; //color table read
-
-`ifdef SIMULATION
-  logic [8:0]   CRAM[511:0];
-`else
-  logic [511:0][8:0] CRAM;
-`endif
   
-  // ALL of our color data
-`ifdef FAKE_CRAM
-  logic [15:0]  FAKE_CRAM[511:0];
-`endif
-
   logic clk5_en, clk7_en, clk10_en;
   
   clock_divider #(4) clk5(.clk(clock), .reset(~reset_N), .clk_en(clk5_en));
@@ -71,27 +56,12 @@ module vce_HuC6260( input logic clock, reset_N,
   
   assign mode  = CR[1:0];
   
-  logic [8:0] CDATA, CBUF, addr, next_addr;
-
   logic [7:0] data_rd;
 
-  assign D  = (~RD_n & ~CS_n) ? data_rd : 8'bz;
-  assign data_rd  = (A == 4) ? CBUF[7:0] :
-                    (A == 5) ? CBUF[8]   : 8'hFF;
+  logic       CPU_we;
+  logic [8:0] MA1, MD1_in, VCE_out, CPU_out;
 
-  assign CDATA  = CRAM[VD];
-
-  logic read, write, prev_RD_n, prev_WR_n;
-
-  //color read buffer handling, SORT OF A HACK
-  //ASSUMES WE HOLD FOR AT LEAST 1 PHYSICAL CYCLE
-  //This is always true for us, but makes me (fseidel) sad
-  //Easy fix is to mux between CRAM and CBUF after first cycle
-  
-  always_ff @(posedge clock, negedge reset_N) begin
-    if(read)
-      CBUF <= CRAM[CTA];
-  end
+  logic       read, write, prev_RD_n, prev_WR_n;
 
   //read/write edge detection
   always_ff @(posedge clock, negedge reset_N) begin
@@ -99,49 +69,64 @@ module vce_HuC6260( input logic clock, reset_N,
       prev_RD_n <= 1;
       prev_WR_n <= 1;
     end
-    else if(clk7_en) begin //runs at MMIO clock
+    else begin
       prev_RD_n <= RD_n | CS_n;
       prev_WR_n <= WR_n | CS_n;
     end
   end
 
-  assign read  = (~RD_n & prev_RD_n);
-  assign write = (~WR_n & prev_WR_n);
+  assign read  = (~RD_n & ~CS_n & prev_RD_n); 
+  assign write = (~WR_n & ~CS_n & prev_WR_n);
+
+  logic [8:0] CTA_latched;
+  assign MA1 = (read | write) ? CTA : CTA_latched;
+  
+  assign CPU_we = (~WR_n & ~CS_n & (A == 5));
+  CRAM cram(.clock, .reset_N,
+            .MA0(VD), .MD0_out(VCE_out),
+            .MA1,.MD1_out(CPU_out), .MD1_in({D[0], CTW}), 
+            .WE1(CPU_we));
+
+  
+  assign D  = (~RD_n & ~CS_n) ? data_rd : 8'bz;
+  assign data_rd  = (A == 4) ? CPU_out[7:0] :
+                    (A == 5) ? CPU_out[8]   : 8'hFF;
+
   
   //MMIO
   always_ff @(posedge clock, negedge reset_N) begin
     if(~reset_N) begin
       CR  <= 2'b00;
       CTA <= 9'h000;
-      CTW <= 16'h0000;
-`ifdef FAKE_CRAM   //load CRAM image
-      $readmemh("gunhed_PAL.hex", FAKE_CRAM);
-      for(int i = 0; i < 512; i++) begin
-        CRAM[i] = FAKE_CRAM[i][8:0];
-      end
-`endif
+      CTA_latched <= 9'h000;
+      CTW <= 8'h00;
     end
-    else if(clk7_en & ~CS_n) begin //MMIO is always at CPU speed
-      if(read) begin
-        if(A == 5)
-          CTA <= CTA + 1;
+    else if(read) begin
+      if(A == 4) begin
+        CTA_latched <= CTA;
       end
-      else if(write) begin
-        case(A)
-          0:
-            CR <= D;
-          2:
-            CTA[7:0] <= D;
-          3:
-            CTA[8] <= D[0];
-          4:
-            CTW <= D;
-          5: begin
-            CRAM[CTA] <= {D[0], CTW};
-            CTA <= CTA + 1;
-          end
-        endcase
+      else if(A == 5) begin
+        CTA         <= CTA + 1;
+        CTA_latched <= CTA;
       end
+    end
+    else if(write) begin
+      case(A)
+        0:
+          CR <= D;
+        2:
+          CTA[7:0] <= D;
+        3:
+          CTA[8] <= D[0];
+        4: begin
+          CTW         <= D;
+          CTA_latched <= CTA;
+        end
+        5: begin
+          CTA         <= CTA + 1;
+          CTA_latched <= CTA;
+        end
+      endcase
     end
   end
 
@@ -153,20 +138,22 @@ module vce_HuC6260( input logic clock, reset_N,
       VIDEO_R <= 0;
       VIDEO_G <= 0;
     end
-    else if(clock_en)
+    else if(clock_en) begin
+      /*
       if(^VD === 1'bx) begin //make TVEmu happy before VRAM init
         VIDEO_B <= 0;
         VIDEO_R <= 0;
         VIDEO_G <= 0;
-      end
-      else begin
-        VIDEO_B <= CDATA[2:0];
-        VIDEO_R <= CDATA[5:3];
-        VIDEO_G <= CDATA[8:6];
-      end
+      end*/
+      //else begin
+        VIDEO_B <= VCE_out[2:0];
+        VIDEO_R <= VCE_out[5:3];
+        VIDEO_G <= VCE_out[8:6];
+      //end
+    end
   end
 
 
-endmodule: vce_HuC6260;
+endmodule: vce_HuC6260
 
 

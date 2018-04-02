@@ -6,8 +6,8 @@
  * (C) 2018 Ford Seidel and Amolak Nagi
  */
 
-`define SIMULATION
-`define FAKE_VRAM
+//`define VRAM_INIT
+//`define FAKE_VRAM
 
 module VRAM (input clock, reset_N,
              input logic [15:0] MA,     // Address signals to VRAM
@@ -16,10 +16,7 @@ module VRAM (input clock, reset_N,
              output logic [15:0] MD_out // data out
             );
 
-  logic [15:0] data_in, data_out;
-  logic [14:0] address;
-
-`ifdef SIMULATION
+`ifdef FAKE_VRAM
   logic [15:0] VRAM_ARR[2**15-1:0]; //32K 16-bit words
   
   always_ff @(posedge clock, negedge reset_N) begin
@@ -28,7 +25,7 @@ module VRAM (input clock, reset_N,
       for(int i = 0; i < 2<<15; i++) begin
         VRAM_ARR[i] = 0; //some games think VRAM is 0 at the start
       end
- `ifdef FAKE_VRAM
+ `ifdef VRAM_INIT
       $readmemh("gunhed_GFX.hex", VRAM_ARR);
  `endif
     end
@@ -41,12 +38,11 @@ module VRAM (input clock, reset_N,
   end
   
 `else
-  RAMTest bram(.address(address),
-               .clock(clock),
-               .data(data_in),
-               .wren(we),
-               .q(data_out)
-              );
+  VRAM_synth vram_real(.address(MA[14:0]),
+                       .clock(clock),
+                       .data(MD_in),
+                       .wren(we && MA < 16'h8000),
+                       .q(MD_out));
 `endif
 
 endmodule: VRAM

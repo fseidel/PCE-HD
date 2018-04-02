@@ -5,3 +5,11 @@ ucli.key
 *.bin
 *.o
 *.swp
+db
+incremental_db/
+output_files/
+simulation/
+cr_ie_info.json
+.restartSimSession.tcl.old
+mem.inter.vpd.tcl
+session.inter.vpd.tcl

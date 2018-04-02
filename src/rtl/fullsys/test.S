@@ -20,62 +20,38 @@ INIT:
     TAM     #$02 ;MPR1 = F8 (RAM)
     LDX     #$FF
     TXS          ;SP init
-    LDA     #$3
-    STA     $02
-    LDX     #$02
-    CLA
-    CLC
-    SET
-    ADC     #2
-    LDA     $02
-    PHA
 MAIN:
-    ST0     #0 ;zero MAWR
-    ST1     #0 
-    ST2     #0
-    ST0     #2 ;put VDC into read/write mode
-    CLX
     CLY
-WRITELOOP:
-    STY     $00, x
-    INX
-    INY
-    BNE     WRITELOOP
-    TIA     $2000, $0002, 256
-    ST0     #1 ;zero MARR
-    ST1     #0
-    ST2     #0
-    ST0     #2 ;put VDC into read/write mode
-    TAI     $0002, $2200, 256
-    ;TIA     GFXDATA+$E000, $0002, 256 ;write graphics to VDC
-    ;TAI     $0002, $2000, 256         ;read them back into zeropage
+    STY     $0402 ;CTA[7:0] = 0
+    STY     $0403 ;CTA[8] = 0
+    TIA     PALDATA+$E000, $0404, 1024 ;write palette to VCE
+    STY     $0402 ;CTA[7:0] = 0
+    STY     $0403 ;CTA[8] = 0
+    TAI     $0404, $2000, 1024 ;dump first 256 bytes of palette for verification
     CLX
-    CLY
 LOOP:
-    LDA     $00, x
-    ;CMP     GFXDATA+$E000, y
-    CMP     $2200, y
+    LDA     PALDATA+$E000, Y
+    CMP     $00, X
     BNE     BAD
+    TXA
+    CMP     #$FF
+    BEQ     GOOD
     INX
     INY
-    BEQ     GOOD
     BRA     LOOP
-GOOD:
-    TXA
-    LDX     #$13
-    LDY     #$37
-    BRA     DONE
 BAD:
     TXA
     LDX     #$BA
     LDY     #$AD
+    BRA     DONE
+GOOD:
+    LDX     #$BE
+    LDY     #$EF
 DONE:
-    ;PLA
-DONELOOP:   
-    BRA     DONELOOP
-GFXDATA:
+    BRA     DONE
+PALDATA:
     .INCDIR ""
-    .INCBIN "GFX_256.bin"
+    .INCBIN "PAL.bin"
     
 .ORG $1FFC                 
     .DW     $FFFF ;NMI Vector
