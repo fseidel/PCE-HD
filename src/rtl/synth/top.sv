@@ -1,6 +1,6 @@
 `default_nettype none
 
-`define SIMULATE
+//`define SIMULATE
 
 /*
  * Top module for synthesis

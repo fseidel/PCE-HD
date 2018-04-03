@@ -435,7 +435,7 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en,
 
 
 
-  assign MD_out = CPU_write_buf; //only matters 1 cycle after clock_en
+  //assign MD_out = CPU_write_buf; //only matters 1 cycle after clock_en
 
   assign CPU_maddr = (CPU_write_issue) ? MAWR : MARR;
   
@@ -1222,13 +1222,14 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en,
         tile_pipe[i].CG1         <= 0;
       end
       SATfetch_cur_entry <= 0;
+      tile_ptr <= 0;
     end
     else if(clock_en) begin
       if(do_BGfetch) begin
         case(char_cycle)
           1: begin
             tile_pipe[bg_wr_ptr].palette_num <= curbat.palette_num;
-            tile_ptr <= (curbat.tile_index << 4) + fetch_row;
+            tile_ptr <= {curbat.tile_index, 4'h0} + fetch_row;
             //$strobe("tile_ptr: %x", tile_ptr);
           end
           5: tile_pipe[bg_wr_ptr].CG0 <= MD_in;
@@ -1263,7 +1264,7 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en,
 
   //VRAM address control
   always_comb begin
-    MA = 0;
+    MA = bat_ptr;
     //assume we have dot width 00
     if(do_BGfetch) begin
       case(char_cycle)

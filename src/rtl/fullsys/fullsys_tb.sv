@@ -52,11 +52,13 @@ module fullsys_tb;
              .CE_n, .CER_n);
    */
   logic [19:0] SRAM_ADDR;
-  logic [15:0] SRAM_DQ;
+  wire  [15:0] SRAM_DQ;
   ROM rom(.addr(AB_21[19:0]), .D(IO_data), .RD_n(RD_n), .CE_n(CE_n),
 	  .SRAM_ADDR(SRAM_ADDR), .SRAM_DQ(SRAM_DQ));
   
-    
+  
+  SRAM sram(.SRAM_ADDR(SRAM_ADDR), .SRAM_DQ(SRAM_DQ));
+  
   vdc_HuC6270 vdc(.clock(clock), .reset_N(reset_N), .clock_en(clock_en),
                   .D(IO_data), .MRD_n(), .MWR_n(),
                   .HSYNC_n(HSYNC_n), .VSYNC_n(VSYNC_n),
@@ -94,7 +96,7 @@ module fullsys_tb;
     reset_N      = 1'b0;
     #100 reset_N <= 1'b1;
     do_write    <= 1'b1;
-    while(frame_count < 600) #10 continue; //352
+    while(frame_count < 100) #10 continue; //352
     //while(VIDEO_R == 0 && VIDEO_G == 0 && VIDEO_B == 0) #10 continue;
       //force vdc.BXR  = 4*frame_count;
       //force vdc.BYR  = 4*frame_count;
@@ -125,10 +127,23 @@ module fullsys_tb;
         frame_count++;
         $display("frame %d", frame_count);
       end
-      if(log_enabled && do_write && clock_en && (frame_count >= 500)) //500
+      if(log_enabled && do_write && clock_en && (frame_count >= 80)) //500
         $fwrite(f, "%3d %3d %3d %b %b\n", R, G, B, HSYNC_n, VSYNC_n);
     end
   end
 
   
 endmodule: fullsys_tb
+
+module SRAM(input  wire [19:0] SRAM_ADDR,
+            inout  wire [15:0] SRAM_DQ);
+
+  logic [7:0] SRAM_ARR[2**20-1:0];
+  
+ initial begin
+   $readmemh("PRG.hex", SRAM_ARR);
+ end
+  
+  assign SRAM_DQ = {SRAM_ARR[(SRAM_ADDR<<1)+1], SRAM_ARR[SRAM_ADDR<<1]};
+  
+endmodule: SRAM
