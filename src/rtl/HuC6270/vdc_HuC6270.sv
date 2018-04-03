@@ -42,22 +42,24 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en,
   // VRAM Initialization
 
   // VRAM address and data bus wires
-  logic [15:0] MA;
+  logic [15:0] MA, MB;
   logic [15:0] MD_in, MD_out, MD_in_buf, latched_read;
-  logic vram_re, vram_we;
+  logic [15:0] CPU_in, CPU_out;
+  logic vram_re, vram_we, CPU_we;
 
   assign vram_re  = ~vram_we;
 
 
   VRAM vram(.clock(clock),  //fseidel: This interface needs some work
             .reset_N(reset_N),
-            .MA(MA),
+            .MA(MA), .MB(MB),
             .re(vram_re),
-            .we(vram_we),
+            .we_a(vram_we), .we_b(CPU_we),
             //.MD_out(MD_in_buf),
             .MD_out(MD_in),
-            .MD_in(MD_out)
-            );
+	    .CPU_out(CPU_in),
+            .MD_in(MD_out),
+	    .CPU_in(CPU_out));
  
 
   // VDC Registers
@@ -72,7 +74,7 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en,
   VDR_t VDR; // $0D
   VCR_t VCR; // $0E
   SATB_t SATB; // $13
-  assign SATB.data = 16'h0800; // TODO: SET THIS
+  //assign SATB.data = 16'h0800; // TODO: SET THIS
 
   //test values from parasol stars
   assign HSR = 16'h0202; // $0A
@@ -212,7 +214,7 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en,
   logic vram_write_pending;
   logic MARR_increment;
   logic CPU_read_issue, CPU_write_issue;
-  logic [15:0] CPU_write_buf;
+  logic [7:0] CPU_write_buf;
   always_ff @(posedge clock, negedge reset_N) begin
     if(~reset_N) begin
       VDC_regnum         <= REG_MAWR; //makes BUSY_n behave on reset
@@ -224,11 +226,12 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en,
       BXR                <= 0;
       BYR                <= 0;
       MWR                <= 16'h10; //Gunhed HACK
+      SATB.data          <= 16'h800;//value for Gunhed and The Kung Fu
     end
     else begin
       if(clock_en) begin
         if(CPU_read_issue) begin
-          MARR <= MARR + addr_incr;
+          MARR <= MARR + addr_incr; //256-byte boundary may be odd, check this!
         end
         if(CPU_write_issue) begin
           MAWR <= MAWR + addr_incr;
@@ -244,7 +247,7 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en,
                 REG_MARR:
                   MARR[7:0] <= D;
                 REG_VRR_VWR:
-                  CPU_write_buf[7:0] <= D;
+                  CPU_write_buf <= D;
                 REG_CR:
                   CR[7:0] <= D;
                 REG_RCR:
@@ -255,6 +258,8 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en,
                   BYR[7:0] <= D;
                 REG_MWR:
                   MWR[7:0] <= D;
+                REG_SATB:
+                  SATB.data[7:0] <= D;
                 /*
                  REG_HSR:
                  HSR[7:0] <= D;
@@ -276,8 +281,7 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en,
                   MAWR[15:8] <= D;
                 REG_MARR:
                   MARR[15:8] <= D;
-                REG_VRR_VWR:
-		  CPU_write_buf[15:8] <= D;
+                REG_VRR_VWR:;
                 REG_CR:
                   CR[12:8] <= D[4:0];
                 REG_RCR:
@@ -287,6 +291,8 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en,
                 REG_BYR:
                   BYR[8]   <= D[0];
                 REG_MWR:; //only 8 bits wide
+                REG_SATB:
+                  SATB.data[15:8] <= D;
               endcase
           endcase
       end
@@ -326,13 +332,31 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en,
   //TODO: MARR update can affect BUSY_n
   //TODO: VBLANK access/BURST mode
   logic CPU_access_ok;
-  assign CPU_access_ok = ((V_state != V_DISP && ~do_SATfetch) || H_state == H_DISP)
-                         & ~char_cycle[0];  //CPU gets even cycles
+  logic do_Spritefetch;
+  assign CPU_access_ok = ~do_Spritefetch;
 
 
   logic mem_wait;
+  assign mem_wait = 1'b0; //hehehehe
+  
+  assign CPU_we  = (WR & ~prev_WR) && VDC_regnum == REG_VRR_VWR && A == 3;
+  
+  assign CPU_write_issue  = CPU_we;
 
+  assign MB  = (CPU_write_issue) ? MAWR : MARR;
 
+  assign CPU_out  = {D, CPU_write_buf[7:0]};
+
+  always_comb begin
+    CPU_read_issue = 1'b0;
+    if((WR & ~prev_WR) && VDC_regnum  == REG_MARR && A == 3) //MARR write
+      CPU_read_issue  = 1'b1;
+    else if((RD & ~prev_RD) && VDC_regnum == REG_VRR_VWR && A == 3)
+      CPU_read_issue  = 1'b1;
+  end
+
+  
+  /*
   logic new_read_req, new_write_req, prev_read_req, prev_write_req,
         cur_read_req, cur_write_req;
   
@@ -364,14 +388,15 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en,
   //assumes a read won't start during an update. This shouldn't happen as long 
   //as long as busy works correctly.
 
-  /* 
+  
+/* 
    * READ occurs when the CPU reads the upper byte of the VRR
    * UPDATE occurs when the CPU modifies the upper byte of the MARR
    * An interesting quirk of the VDC is that modifying the lower byte of the
    * MARR does not trigger a memory fetch. The upper byte, however, will trigger
    * a memory fetch and MARR increment.
    */
-  
+  /*
   always_comb begin
     mem_nextstate    = IDLE;
     CPU_read_issue   = 0;
@@ -403,7 +428,8 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en,
            mem_nextstate  = WAIT;
     endcase
   end
-
+   
+*/
   logic [15:0] CPU_maddr; //goes to address generator
   //assign CPU_maddr = (vram_we) ? MAWR : MARR;
 
@@ -417,13 +443,13 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en,
   //next state logic. Turns out that doing this 240-style is really clean
   always_ff @(posedge clock, negedge reset_N) begin
     if(~reset_N) begin
-      mem_state <= IDLE;
+      //mem_state <= IDLE;
+      VRAM_readbuf <= 16'h0000;
     end
     else if(clock_en) begin
-      mem_state <= mem_nextstate;
+      //mem_state <= mem_nextstate;
       if(CPU_read_issue)
-        VRAM_readbuf <= MD_in;
-      
+        VRAM_readbuf <= CPU_in;
     end
   end
   
@@ -431,23 +457,20 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en,
   //assign VRAM_output = (char_cycle[0]) ? MD_in : VRAM_readbuf;
   assign VRAM_output = VRAM_readbuf;
 
-  //TODO: is this fast enough?
   always_ff @(posedge clock, negedge reset_N) begin
     if(~reset_N) begin
       D_out <= 0;
     end
-    else if(clock_en & RD & ~prev_RD) begin
+    else if(RD & ~prev_RD & clock_en) begin
       if(A == 0)
         D_out <= status;
       else if(A == 1)
         D_out <= 0; //reads back 0, writes ignored
       else if(VDC_regnum == REG_VRR_VWR) begin
-        if(mem_state == IDLE) begin
-          if(~A[0]) //A == 2
-            D_out <= VRAM_readbuf[7:0];
-          else //A == 3
-            D_out <= VRAM_readbuf[15:8];
-        end
+        if(~A[0]) //A == 2
+          D_out <= VRAM_readbuf[7:0];
+        else //A == 3
+          D_out <= VRAM_readbuf[15:8];
       end
     end
   end
@@ -466,7 +489,8 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en,
   end
 
 
-  assign vram_we = CPU_write_issue;
+  //assign vram_we = CPU_write_issue;
+  assign vram_we = 1'b0;
   
   /*
    * Horizontal Syncronization
@@ -487,7 +511,7 @@ module vdc_HuC6270(input logic clock, reset_N, clock_en,
                           (V_state == V_DISP && V_cnt != 0 
                            && H_state == H_DISP);
 
-  logic do_Spritefetch;
+  //logic do_Spritefetch; //fseidel:had to move this up
   assign do_Spritefetch = (V_state == V_WAIT && V_cnt == 0 && H_state == H_END) 
                           || (V_state == V_DISP && V_cnt != 0 &&
                               (H_state == H_SYNC ||

@@ -108,7 +108,7 @@ module fullsys_tb;
     if(pclog_enabled) begin
       $fclose(pclog);
     end
-    //$strobe("A: %x, X: %x, Y: %x", CPU.A, CPU.X, CPU.Y);
+    $strobe("A: %x, X: %x, Y: %x", CPU.A, CPU.X, CPU.Y);
     #1 $finish;
   end
   

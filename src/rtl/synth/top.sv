@@ -1,21 +1,23 @@
 `default_nettype none
 
+`define SIMULATE
+
 /*
  * Top module for synthesis
  */
 
 module ChipInterface(input  logic        CLOCK_50,
-		     output logic [7:0]  VGA_R, VGA_G, VGA_B,
-		     output logic 	 VGA_BLANK_N, VGA_CLK, VGA_SYNC_N,
-		     output logic 	 VGA_VS, VGA_HS,
-		     output wire [19:0]  SRAM_ADDR,
-		     output wire 	 SRAM_CE_N, SRAM_OE_N, SRAM_WE_N,
-		     output wire         SRAM_LB_N, SRAM_UB_N, 	 
-		     inout wire [15:0] 	 SRAM_DQ,
-		     output logic [17:0] LEDR,
-		     output logic [8:0]  LEDG,
-		     input logic [17:0]  SW,
-		     input logic [3:0] 	 KEY);
+                     output logic [7:0]  VGA_R, VGA_G, VGA_B,
+                     output logic        VGA_BLANK_N, VGA_CLK, VGA_SYNC_N,
+                     output logic        VGA_VS, VGA_HS,
+                     output wire [19:0]  SRAM_ADDR,
+                     output wire         SRAM_CE_N, SRAM_OE_N, SRAM_WE_N,
+                     output wire         SRAM_LB_N, SRAM_UB_N, 
+                     inout wire [15:0]   SRAM_DQ,
+                     output logic [17:0] LEDR,
+                     output logic [8:0]  LEDG,
+                     input logic [17:0]  SW,
+                     input logic [3:0]   KEY);
 
 
   assign SRAM_CE_N  = 1'b0;
@@ -47,15 +49,15 @@ module ChipInterface(input  logic        CLOCK_50,
   assign VGA_HS  = HSYNC_n;
   assign VGA_VS  = VSYNC_n;
 
+  logic [7:0] R, G, B;
   assign VGA_R  = R;
   assign VGA_G  = G;
-  assign VGA_B 	= B;
+  assign VGA_B  = B;
   assign VGA_SYNC_N = 1'b1;
   assign VGA_BLANK_N = 1'b1;
   assign VGA_CLK = CLOCK_21;
   
   logic [2:0] VIDEO_R, VIDEO_G, VIDEO_B;
-  logic [7:0] R, G, B;
 
   int         cycle;
 
@@ -104,8 +106,9 @@ module ChipInterface(input  logic        CLOCK_50,
   
   cpu_HuC6280 CPU(.*);
 
-  ROM rom(.addr(AB_21[19:0]), .D(IO_data), .RD_n(RD_n), .CE_n(CE_n),
-	      .SRAM_ADDR(SRAM_ADDR), .SRAM_DQ(SRAM_DQ));  
+  ROM rom(.clk(clk), .reset(reset),
+      .addr(AB_21[19:0]), .D(IO_data), .RD_n(RD_n), .CE_n(CE_n),
+      .SW(SW[2:0]), .SRAM_ADDR(SRAM_ADDR), .SRAM_DQ(SRAM_DQ));  
   
   vdc_HuC6270 vdc(.clock(CLOCK_21), .reset_N(reset_N), .clock_en(clock_en),
                   .D(IO_data), .MRD_n(), .MWR_n(),
@@ -124,3 +127,49 @@ module ChipInterface(input  logic        CLOCK_50,
   
   
 endmodule: ChipInterface
+
+`ifdef SIMULATE
+module simTB();
+  logic CLOCK_50, VGA_BLANK_N, VGA_CLK, VGA_SYNC_N, VGA_VS, VGA_HS;
+  logic [7:0]  VGA_R, VGA_B, VGA_G;
+  logic [19:0] SRAM_ADDR;
+  logic        SRAM_CE_N, SRAM_OE_N, SRAM_WE_N, SRAM_LB_N, SRAM_UB_N;
+  wire  [15:0] SRAM_DQ;
+  logic [17:0] LEDR;
+  logic [8:0]  LEDG;
+  logic [17:0] SW;
+  logic [3:0] KEY;
+  
+  ChipInterface CI(.CLOCK_50,
+                   .VGA_R, .VGA_G, .VGA_B,
+                   .VGA_BLANK_N, .VGA_CLK, .VGA_SYNC_N,
+                   .VGA_VS, .VGA_HS,
+                   .SRAM_ADDR,
+                   .SRAM_CE_N, .SRAM_OE_N, .SRAM_WE_N,
+                   .SRAM_LB_N, .SRAM_UB_N, 
+                   .SRAM_DQ,
+                   .LEDR,
+                   .LEDG,
+                   .SW,
+                   .KEY);
+
+  int framecnt;
+  initial begin
+    framecnt     = 0;
+    CLOCK_50     = 0;
+    KEY[0]       = 0;
+    #100 KEY[0] <= 1;
+  end
+  
+  initial begin
+    forever #5 CLOCK_50 = ~CLOCK_50;
+  end
+
+  always @(negedge VGA_VS) begin
+    framecnt++;
+    $display("frame %d", framecnt);
+    if(framecnt == 2) $finish;
+  end
+  
+endmodule: simTB
+`endif

@@ -10,10 +10,10 @@
 //`define FAKE_VRAM
 
 module VRAM (input clock, reset_N,
-             input logic [15:0] MA,     // Address signals to VRAM
-             input logic re, we,        // write enable
-             input logic [15:0] MD_in,  // data in
-             output logic [15:0] MD_out // data out
+             input logic [15:0] MA, MB,          // Address signals to VRAM
+             input logic re, we_a, we_b,         // write enable
+             input logic [15:0] MD_in, CPU_in,   // data in
+             output logic [15:0] MD_out, CPU_out // data out
             );
 
 `ifdef FAKE_VRAM
@@ -38,11 +38,15 @@ module VRAM (input clock, reset_N,
   end
   
 `else
-  VRAM_synth vram_real(.address(MA[14:0]),
-                       .clock(clock),
-                       .data(MD_in),
-                       .wren(we && MA < 16'h8000),
-                       .q(MD_out));
+  VRAM_2port_synth vram_real(.address_a(MA[14:0]),
+			     .address_b(MB[14:0]),
+			     .clock(clock),
+			     .data_a(MD_in),
+			     .data_b(CPU_in),
+			     .wren_a(we_a && MA < 16'h8000),
+			     .wren_b(we_b && MB < 16'h8000),
+			     .q_a(MD_out),
+			     .q_b(CPU_out));
 `endif
 
 endmodule: VRAM
